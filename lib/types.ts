@@ -63,6 +63,7 @@ export interface AppSubmission {
   booking_date?: string;
   respondent_email?: string;
   respondent_name?: string;
+  respondent_phone?: string;
   source?: "api" | "csv";
   answers: AppSubmissionAnswer[];
   grade?: AppSubmissionGrade;

@@ -213,6 +213,8 @@ export function parseTypeformPayload(
 export interface MappedWebhookData {
   email?: string;
   name?: string;
+  phone?: string;
+  submission_id?: string;
   submitted_at?: string;
   booking_date?: string;
   close_date?: string;
@@ -287,6 +289,10 @@ export function applyFieldMapping(
       lastName = value.trim();
     } else if (target === "full_name") {
       fullName = value.trim();
+    } else if (target === "phone") {
+      result.phone = value.trim();
+    } else if (target === "submission_id") {
+      result.submission_id = value.trim();
     } else if (target === "submitted_at") {
       result.submitted_at = value;
     } else if (target === "booking_date") {
@@ -438,10 +444,11 @@ export function mergeWebhookData(
   if (!data.email) {
     // Without email, we can't merge — just create a new submission
     const newSub: AppSubmission = {
-      id: uid(),
+      id: data.submission_id || uid(),
       submitted_at: data.submitted_at || new Date().toISOString(),
       booking_date: data.booking_date,
       respondent_name: data.name,
+      respondent_phone: data.phone,
       source: "api",
       answers: data.answers.map((a) => ({
         question_ref: a.question_title,
@@ -507,6 +514,7 @@ export function mergeWebhookData(
     if (data.submitted_at) existing.submitted_at = data.submitted_at;
     if (data.booking_date) existing.booking_date = data.booking_date;
     if (data.name) existing.respondent_name = data.name;
+    if (data.phone) existing.respondent_phone = data.phone;
 
     if (Object.values(data.grade).some((v) => v !== undefined)) {
       existing.grade = { ...existing.grade, ...data.grade };
@@ -518,11 +526,12 @@ export function mergeWebhookData(
     submissions[existingSubIdx] = existing;
   } else {
     const newSub: AppSubmission = {
-      id: uid(),
+      id: data.submission_id || uid(),
       submitted_at: data.submitted_at || new Date().toISOString(),
       booking_date: data.booking_date,
       respondent_email: email,
       respondent_name: data.name,
+      respondent_phone: data.phone,
       source: "api",
       answers,
     };

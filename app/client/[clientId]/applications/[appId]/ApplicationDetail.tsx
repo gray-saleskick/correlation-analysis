@@ -4052,12 +4052,16 @@ function WebhooksTab({
         p => p.id !== pendingItem.id
       );
 
-      // Update config with new mapping and signature
-      const newSignature = computeFieldSignature(payloadKeys);
+      // Update config with cumulative signature (union of known + pending fields)
+      const knownFields = new Set(
+        config?.last_field_signature ? config.last_field_signature.split("|") : []
+      );
+      for (const k of payloadKeys) knownFields.add(k);
+      const cumulativeSignature = computeFieldSignature(Array.from(knownFields));
       updated = {
         ...updated,
         webhook_config: config
-          ? { ...config, field_mapping: newMappings, last_field_signature: newSignature }
+          ? { ...config, field_mapping: newMappings, last_field_signature: cumulativeSignature }
           : undefined,
         pending_webhook_submissions: updatedPending,
       };
