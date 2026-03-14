@@ -60,6 +60,17 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
   const [pwSuccess, setPwSuccess] = useState("");
   const [changingPw, setChangingPw] = useState(false);
 
+  // Admin actions state
+  const [resetTarget, setResetTarget] = useState<UserInfo | null>(null);
+  const [resetPw, setResetPw] = useState("");
+  const [resetConfirmPw, setResetConfirmPw] = useState("");
+  const [resettingPw, setResettingPw] = useState(false);
+  const [resetPwError, setResetPwError] = useState("");
+  const [resetPwSuccess, setResetPwSuccess] = useState("");
+  const [deleteUserTarget, setDeleteUserTarget] = useState<UserInfo | null>(null);
+  const [deletingUser, setDeletingUser] = useState(false);
+  const [deleteUserError, setDeleteUserError] = useState("");
+
   async function loadUsers() {
     setLoadingUsers(true);
     try {
@@ -113,6 +124,51 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
       }
     } catch { setPwError("Network error"); }
     finally { setChangingPw(false); }
+  }
+
+  async function handleResetPassword() {
+    if (!resetTarget || !resetPw) return;
+    if (resetPw !== resetConfirmPw) { setResetPwError("Passwords don't match"); return; }
+    if (resetPw.length < 6) { setResetPwError("Password must be at least 6 characters"); return; }
+    setResettingPw(true);
+    setResetPwError(""); setResetPwSuccess("");
+    try {
+      const res = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: resetTarget.id, newPassword: resetPw }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResetPwSuccess(`Password reset for ${resetTarget.name || resetTarget.email}`);
+        setResetPw(""); setResetConfirmPw("");
+        setTimeout(() => { setResetTarget(null); setResetPwSuccess(""); }, 2000);
+      } else {
+        setResetPwError(data.error || "Failed to reset password");
+      }
+    } catch { setResetPwError("Network error"); }
+    finally { setResettingPw(false); }
+  }
+
+  async function handleDeleteUser() {
+    if (!deleteUserTarget) return;
+    setDeletingUser(true);
+    setDeleteUserError("");
+    try {
+      const res = await fetch("/api/auth/delete-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: deleteUserTarget.id }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDeleteUserTarget(null);
+        loadUsers();
+      } else {
+        setDeleteUserError(data.error || "Failed to delete account");
+      }
+    } catch { setDeleteUserError("Network error"); }
+    finally { setDeletingUser(false); }
   }
 
   useEffect(() => {
@@ -510,14 +566,68 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
                     ) : users.length === 0 ? (
                       <p className="text-[11px] text-slate-400">No accounts found.</p>
                     ) : (
-                      <div className="space-y-1">
+                      <div className="space-y-2">
                         {users.map((u) => (
-                          <div key={u.id} className="flex items-center justify-between px-3 py-2 bg-white/[0.04] border border-white/[0.06] rounded-lg">
-                            <div>
-                              <p className="text-xs font-medium text-slate-300">{u.name || u.email}</p>
-                              {u.name && <p className="text-[10px] text-slate-500">{u.email}</p>}
+                          <div key={u.id} className="px-3 py-2.5 bg-white/[0.04] border border-white/[0.06] rounded-lg">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-xs font-medium text-slate-300">{u.name || u.email}</p>
+                                {u.name && <p className="text-[10px] text-slate-500">{u.email}</p>}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <p className="text-[10px] text-slate-500 mr-1">{new Date(u.created_at).toLocaleDateString()}</p>
+                                <button
+                                  onClick={() => { setResetTarget(u); setResetPw(""); setResetConfirmPw(""); setResetPwError(""); setResetPwSuccess(""); }}
+                                  className="p-1 text-slate-500 hover:text-amber-400 transition-colors"
+                                  title="Reset password"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => { setDeleteUserTarget(u); setDeleteUserError(""); }}
+                                  className="p-1 text-slate-500 hover:text-red-400 transition-colors"
+                                  title="Remove account"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                  </svg>
+                                </button>
+                              </div>
                             </div>
-                            <p className="text-[10px] text-slate-500">{new Date(u.created_at).toLocaleDateString()}</p>
+
+                            {/* Inline reset password form */}
+                            {resetTarget?.id === u.id && (
+                              <div className="mt-3 pt-3 border-t border-white/[0.06] space-y-2">
+                                <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Reset Password for {u.name || u.email}</p>
+                                <input type="password" value={resetPw} onChange={(e) => setResetPw(e.target.value)} placeholder="New password" className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-transparent" />
+                                <input type="password" value={resetConfirmPw} onChange={(e) => setResetConfirmPw(e.target.value)} placeholder="Confirm new password" className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-transparent" />
+                                {resetPwError && <p className="text-[11px] text-red-400">{resetPwError}</p>}
+                                {resetPwSuccess && <p className="text-[11px] text-emerald-400">{resetPwSuccess}</p>}
+                                <div className="flex gap-2">
+                                  <button onClick={() => setResetTarget(null)} className="px-3 py-1.5 text-[11px] font-semibold border border-white/[0.08] rounded-lg text-slate-300 hover:bg-white/[0.04] transition-colors">Cancel</button>
+                                  <button onClick={handleResetPassword} disabled={resettingPw || !resetPw || !resetConfirmPw} className="px-3 py-1.5 text-[11px] font-semibold bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors">
+                                    {resettingPw ? "Resetting…" : "Reset Password"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Inline delete confirmation */}
+                            {deleteUserTarget?.id === u.id && (
+                              <div className="mt-3 pt-3 border-t border-red-500/20 space-y-2">
+                                <p className="text-[11px] text-red-400 font-semibold">Remove {u.name || u.email} from the team?</p>
+                                <p className="text-[10px] text-slate-400">This will revoke their access. It won&apos;t affect any data.</p>
+                                {deleteUserError && <p className="text-[11px] text-red-400">{deleteUserError}</p>}
+                                <div className="flex gap-2">
+                                  <button onClick={() => setDeleteUserTarget(null)} className="px-3 py-1.5 text-[11px] font-semibold border border-white/[0.08] rounded-lg text-slate-300 hover:bg-white/[0.04] transition-colors">Cancel</button>
+                                  <button onClick={handleDeleteUser} disabled={deletingUser} className="px-3 py-1.5 text-[11px] font-semibold bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-40 transition-colors">
+                                    {deletingUser ? "Removing…" : "Remove Account"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

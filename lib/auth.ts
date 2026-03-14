@@ -136,3 +136,22 @@ export async function updatePassword(userId: string, newPassword: string) {
   user.password_hash = await hashPassword(newPassword);
   await writeUsersStore(store);
 }
+
+export async function resetUserPassword(userId: string, newPassword: string) {
+  // Admin reset — no current password required
+  const store = await readUsersStore();
+  const user = store.users.find(u => u.id === userId);
+  if (!user) throw new Error("User not found");
+
+  user.password_hash = await hashPassword(newPassword);
+  await writeUsersStore(store);
+}
+
+export async function deleteUser(userId: string) {
+  const store = await readUsersStore();
+  const idx = store.users.findIndex(u => u.id === userId);
+  if (idx === -1) throw new Error("User not found");
+
+  store.users.splice(idx, 1);
+  await writeUsersStore(store);
+}
