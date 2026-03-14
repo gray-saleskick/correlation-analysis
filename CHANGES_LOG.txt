@@ -1,0 +1,194 @@
+===============================================================================
+CORRELATION ANALYSIS v2 — COMPREHENSIVE CHANGES LOG
+Date: March 12, 2026
+===============================================================================
+
+This document covers all changes made during the full aesthetic overhaul,
+backend security audit, and code quality review session.
+
+===============================================================================
+SECTION 1: UI/UX CHANGES (from earlier in session)
+===============================================================================
+
+1.1 STUDIO VIEW REMOVAL
+  - Removed "Studio" toggle button from correlation view mode switcher
+  - Deleted entire Studio view rendering section (~300 lines)
+  - Changed viewMode type from "modern" | "classic" | "studio" to "modern" | "classic"
+
+1.2 EXCLUDED RECORDS TEXT
+  - Moved "X financial records excluded" / "X call results excluded" to a new
+    line below "Only records with emails found in Submissions are included"
+  - Added dot separator between financial and call result exclusion counts
+
+1.3 OVERVIEW BADGE CENTERING
+  - Submissions badge (no percentage ring) now shows both the count AND
+    "Submissions" label centered inside the badge circle area
+  - Percentage-based badges (Booked/Showed/Closed) show label below ring
+
+1.4 CLASSIC VIEW STICKY HEADER FIX
+  - Replaced transparent bg-white/[0.02] with opaque bg-[#0b1120] on header row
+  - Replaced transparent bg-white/[0.04] with opaque bg-[#0d1425] on sticky
+    left category cells
+  - Text no longer overlaps when scrolling horizontally or vertically
+
+1.5 UNDO BUTTON FIX
+  - Root cause: saveApp useCallback captured stale `app` via closure
+  - Fix: Added appRef (useRef) that always holds the latest app state
+  - saveApp now reads appRef.current instead of closure `app` for undo stack
+  - Removed `app` from useCallback dependency array (uses ref instead)
+
+1.6 RECORD SORTING
+  - Financial records: auto-sorted alphabetically by email
+  - Call results: sorted linked-first by booking date (descending),
+    then unlinked by booking date, then alphabetical by email
+
+1.7 HEAT MAP (NEW)
+  - Added "Booking Rate Heat Map" section at bottom of Modern correlation view
+  - Shows questions as rows, answers as tile cells
+  - Cell intensity (indigo opacity) indicates booking completion rate
+  - Hover tooltip shows detailed breakdown (apps, booked, showed, closed)
+  - Click any cell to drill down to matching submissions
+  - Legend bar at bottom shows intensity scale (0% to 100%)
+
+1.8 CLIENT DELETE REDESIGN (HomeClient.tsx)
+  - Removed inline trash/delete buttons from client list rows
+  - Added settings gear icon button in top-right header
+  - Settings modal includes:
+    * Anthropic API Key section (stored in localStorage)
+    * Delete Client section with search-first flow
+    * Type-to-confirm safety check before deletion
+
+1.9 APPLICATION DELETE REDESIGN (ClientDetailPage.tsx)
+  - Replaced native confirm() dialog with custom dark-themed modal
+  - Modal shows warning icon, app name, and Cancel/Delete buttons
+  - Delete button requires explicit click (no type-to-confirm needed here)
+
+===============================================================================
+SECTION 2: FULL AESTHETIC OVERHAUL
+===============================================================================
+
+2.1 LIGHT THEME REMNANTS FIXED
+  - 6x bg-indigo-50/30 → bg-indigo-500/10 (CSV mapping dropdowns)
+  - 4x hover:file:bg-indigo-100 → hover:file:bg-indigo-500/20 (file inputs)
+  - 4x duplicate bg-white/[0.04] bg-white/[0.05] → bg-white/[0.04]
+  - 1x hover:bg-red-500/100/10 (invalid) → hover:bg-red-400/10
+
+2.2 COLOR CONSISTENCY (Dark Theme Polish)
+  - text-red-500 → text-red-400 (better contrast on dark backgrounds)
+  - text-indigo-500 → text-indigo-400 (consistent indigo tone)
+  - text-emerald-600 → text-emerald-400 (better dark theme readability)
+
+2.3 FONT LIGHTENING (50% Lighter)
+  - text-slate-400 → text-slate-300 (labels, metadata, descriptions)
+  - text-slate-500 → text-slate-400 (secondary/muted text)
+  - Applied across ALL files: ApplicationDetail, HomeClient, ClientDetailPage
+
+2.4 DEPTH & POLISH
+  - Added shadow-sm shadow-black/10 to correlation stat cards
+  - Added shadow-sm shadow-black/10 to card elements in ClientDetailPage
+  - Added subtle bg-white/[0.02] background to tab bar
+  - Added pill background (bg-white/[0.02] rounded-lg px-3 py-2) to breadcrumbs
+
+2.5 INTERACTION IMPROVEMENTS
+  - Added hover:bg-white/[0.02] to <details> summary elements
+  - Delete buttons now have hover:bg-red-400/10 background on hover
+  - Error dismiss button lightened for better visibility
+  - Default tab changed from "correlation" to "questions" (better UX)
+
+2.6 CUSTOM CONFIRMATION MODAL
+  - Added dark-themed confirmation modal component (bg-slate-900,
+    backdrop-blur-sm, rounded-2xl)
+  - Available via showConfirm() function for replacing native confirm()
+  - Cancel + Confirm buttons with proper styling
+
+===============================================================================
+SECTION 3: BACKEND SECURITY FIXES
+===============================================================================
+
+3.1 PATH TRAVERSAL PROTECTION (lib/store.ts) [CRITICAL]
+  - Added isValidId() function: validates IDs match /^[a-z0-9][a-z0-9_-]{0,60}$/
+  - clientDir() now validates clientId before constructing path
+  - Added resolved path check: ensures path stays within CLIENTS_DIR
+  - listClients() now skips hidden directories and validates entry names
+
+3.2 INPUT VALIDATION (All API Routes) [CRITICAL]
+  - Client name: max 100 characters, trimmed
+  - Application title: max 200 characters, trimmed
+  - Application count: max 50 per client
+  - PUT body size: max 10MB via content-length check
+
+3.3 ERROR HANDLING (All API Routes) [HIGH]
+  - Wrapped all route handlers in try/catch blocks
+  - Generic "Internal server error" messages returned to client
+  - Detailed errors logged server-side via console.error
+  - No stack traces or internal paths leaked to client
+
+3.4 CONTENT-TYPE VALIDATION (POST /api/clients) [HIGH]
+  - POST requests now validate Content-Type: application/json
+  - Returns 415 Unsupported Media Type for non-JSON requests
+
+3.5 ATOMIC FILE WRITES (lib/store.ts) [MEDIUM]
+  - writeProfile() now writes to .tmp file first, then renames
+  - Prevents data corruption from interrupted writes
+  - Profile file is never in a partially-written state
+
+3.6 SECURITY HEADERS (next.config.mjs) [MEDIUM]
+  - X-Content-Type-Options: nosniff
+  - X-Frame-Options: DENY (clickjacking protection)
+  - X-XSS-Protection: 1; mode=block
+  - Referrer-Policy: strict-origin-when-cross-origin
+  - Permissions-Policy: camera=(), microphone=(), geolocation=()
+  - API routes: Cache-Control: no-store, no-cache, must-revalidate
+
+3.7 FILE SIZE LIMIT (lib/store.ts) [MEDIUM]
+  - readProfile() now checks file size (max 50MB)
+  - Prevents memory exhaustion from corrupted/malicious profile files
+
+3.8 COLLISION LIMIT (lib/store.ts) [LOW]
+  - createClient() now limits ID collision retries to 1000
+  - Prevents infinite loop from adversarial input
+
+===============================================================================
+SECTION 4: KNOWN ISSUES & RECOMMENDATIONS FOR FUTURE
+===============================================================================
+
+4.1 AUTHENTICATION (Not Implemented — Needed Before Production)
+  - Currently NO authentication on any API route
+  - Recommendation: Add JWT or session-based auth middleware
+  - All routes are publicly accessible
+
+4.2 CSRF PROTECTION (Not Implemented)
+  - State-changing operations (POST/PUT/DELETE) lack CSRF tokens
+  - Recommendation: Add origin/referer validation middleware
+
+4.3 RATE LIMITING (Not Implemented)
+  - No rate limiting on any endpoint
+  - Recommendation: Use upstash/ratelimit or similar
+
+4.4 TYPEFORM PAT STORAGE
+  - Still stored in plain text in profile.json
+  - Recommendation: Use environment variables or encrypted secrets vault
+
+4.5 NATIVE confirm() DIALOGS
+  - Several confirm() calls remain in ApplicationDetail.tsx sub-components
+  - showConfirm() function is available but not yet wired to all locations
+  - Recommendation: Migrate remaining confirm() calls to custom modal
+
+4.6 NEXT.JS VERSION
+  - Currently on 14.2.35 (has known vulnerabilities)
+  - Recommendation: Upgrade to latest stable when ready
+
+===============================================================================
+BUILD VERIFICATION
+===============================================================================
+
+Final build: PASSED
+  - Compiled successfully (no TypeScript errors)
+  - All pages generate correctly
+  - Bundle sizes:
+    * Home page: 3.4 kB (91 kB first load)
+    * Client detail: 2.46 kB (98.7 kB first load)
+    * Application detail: 34.5 kB (131 kB first load)
+    * Shared JS: 87.6 kB
+
+===============================================================================

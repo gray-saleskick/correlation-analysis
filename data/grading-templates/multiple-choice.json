@@ -1,0 +1,6 @@
+{
+  "id": "multiple-choice",
+  "label": "Multiple Choice Grading",
+  "explanation": "When grading multiple choice questions, we tell the AI each response it could receive and how it should grade the response. We can also negatively weigh responses to have an impact on the overall application grade, or use extremely negative weights for responses that always require further qualification.",
+  "template": "Give a 1 for the answer: \"OPTION\"\nGive a 2 for the answer: \"OPTION\"\nGive a 3 for the answer: \"OPTION\"\nGive a 4 for the answer: \"OPTION\""
+}

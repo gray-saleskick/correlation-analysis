@@ -1,0 +1,6 @@
+node_modules/
+.next/
+.env.local
+clients/
+.DS_Store
+tsconfig.tsbuildinfo
