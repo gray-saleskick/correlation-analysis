@@ -3109,6 +3109,7 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
   // Column assignments
   const [emailCol, setEmailCol] = useState("");
   const [bookingDateCol, setBookingDateCol] = useState("");
+  const [closeDateCol, setCloseDateCol] = useState("");
   const [bookedCol, setBookedCol] = useState("");
   const [showedCol, setShowedCol] = useState("");
   const [closedCol, setClosedCol] = useState("");
@@ -3155,6 +3156,7 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
     for (const h of result.headers) lowerHeaders[h.toLowerCase().replace(/[^a-z]/g, "")] = h;
     setEmailCol(lowerHeaders["email"] ?? lowerHeaders["prospectemail"] ?? lowerHeaders["emailaddress"] ?? "");
     setBookingDateCol(lowerHeaders["bookingdate"] ?? lowerHeaders["dateofbooking"] ?? "");
+    setCloseDateCol(lowerHeaders["closedate"] ?? lowerHeaders["closeddate"] ?? lowerHeaders["close_date"] ?? "");
     setBookedMode("any");
     setShowedMode("any");
     setClosedMode("any");
@@ -3235,6 +3237,7 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
       if (!email) continue;
 
       const booking_date = bookingDateCol ? normalizeDate(row[bookingDateCol]?.trim() ?? "") : undefined;
+      const close_date = closeDateCol ? normalizeDate(row[closeDateCol]?.trim() ?? "") : undefined;
 
       let booked = false;
       let showed = false;
@@ -3255,7 +3258,7 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
       if (showed) booked = true;
 
       if (email) {
-        records.push({ email, booking_date, booked, showed, closed });
+        records.push({ email, booking_date, close_date, booked, showed, closed });
       }
     }
 
@@ -3442,10 +3445,10 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
   }
 
   const [showAddCrModal, setShowAddCrModal] = useState(false);
-  const [newCrFields, setNewCrFields] = useState<{ email: string; booking_date: string; booked: boolean; showed: boolean; closed: boolean }>({ email: "", booking_date: "", booked: false, showed: false, closed: false });
+  const [newCrFields, setNewCrFields] = useState<{ email: string; booking_date: string; close_date: string; booked: boolean; showed: boolean; closed: boolean }>({ email: "", booking_date: "", close_date: "", booked: false, showed: false, closed: false });
 
   function openAddCrModal() {
-    setNewCrFields({ email: "", booking_date: "", booked: false, showed: false, closed: false });
+    setNewCrFields({ email: "", booking_date: "", close_date: "", booked: false, showed: false, closed: false });
     setShowAddCrModal(true);
   }
 
@@ -3453,6 +3456,7 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
     const newRec: CallResultRecord = {
       email: newCrFields.email,
       booking_date: newCrFields.booking_date || undefined,
+      close_date: newCrFields.close_date || undefined,
       booked: newCrFields.booked,
       showed: newCrFields.showed,
       closed: newCrFields.closed,
@@ -3554,6 +3558,20 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
             {bookingDateCol && colSamples[bookingDateCol] && (
               <div className="mt-2 flex flex-wrap gap-1">
                 {colSamples[bookingDateCol].map((v) => <span key={v} className="text-[10px] text-slate-300">{v}</span>)}
+              </div>
+            )}
+          </div>
+
+          {/* Close Date column */}
+          <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-4">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-300 mb-2">Close Date Column</p>
+            <select value={closeDateCol} onChange={(e) => setCloseDateCol(e.target.value)} className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${closeDateCol ? "border-indigo-500/30 text-slate-400 bg-indigo-500/10" : "border-white/[0.08] text-slate-300"}`}>
+              <option value="">— None —</option>
+              {parsed.headers.map((h) => <option key={h} value={h}>{h}</option>)}
+            </select>
+            {closeDateCol && colSamples[closeDateCol] && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {colSamples[closeDateCol].map((v) => <span key={v} className="text-[10px] text-slate-300">{v}</span>)}
               </div>
             )}
           </div>
@@ -3676,9 +3694,12 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
                   {r.booked && <span className="text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 rounded-full px-1.5 py-0.5 shrink-0">booked</span>}
                   {r.showed && <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 rounded-full px-1.5 py-0.5 shrink-0">showed</span>}
                   {r.closed && <span className="text-[10px] font-semibold bg-green-500/10 text-green-400 rounded-full px-1.5 py-0.5 shrink-0">closed</span>}
+                  {r.close_date && (
+                    <span className="text-[10px] bg-white/[0.06] text-slate-300 rounded px-1.5 py-0.5 shrink-0">closed {r.close_date}</span>
+                  )}
                 </summary>
                 <div className="border-t border-white/[0.06] p-3 space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-300 mb-1">Email</label>
                       <input
@@ -3695,6 +3716,15 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
                       <input
                         defaultValue={r.booking_date ?? ""}
                         onBlur={(e) => updateRecord(r.email, { booking_date: e.target.value || undefined })}
+                        placeholder="YYYY-MM-DD"
+                        className="w-full rounded border border-white/[0.08] px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white/[0.04]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">Close Date</label>
+                      <input
+                        defaultValue={r.close_date ?? ""}
+                        onBlur={(e) => updateRecord(r.email, { close_date: e.target.value || undefined })}
                         placeholder="YYYY-MM-DD"
                         className="w-full rounded border border-white/[0.08] px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white/[0.04]"
                       />
@@ -3795,14 +3825,25 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
                   className="w-full rounded border border-white/[0.08] px-2.5 py-1.5 text-xs text-slate-200 bg-white/[0.04] focus:outline-none focus:ring-1 focus:ring-indigo-400 placeholder:text-slate-400"
                 />
               </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Booking Date</label>
-                <input
-                  value={newCrFields.booking_date}
-                  onChange={(e) => setNewCrFields((p) => ({ ...p, booking_date: e.target.value }))}
-                  placeholder="YYYY-MM-DD"
-                  className="w-full rounded border border-white/[0.08] px-2.5 py-1.5 text-xs text-slate-200 bg-white/[0.04] focus:outline-none focus:ring-1 focus:ring-indigo-400 placeholder:text-slate-400"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Booking Date</label>
+                  <input
+                    value={newCrFields.booking_date}
+                    onChange={(e) => setNewCrFields((p) => ({ ...p, booking_date: e.target.value }))}
+                    placeholder="YYYY-MM-DD"
+                    className="w-full rounded border border-white/[0.08] px-2.5 py-1.5 text-xs text-slate-200 bg-white/[0.04] focus:outline-none focus:ring-1 focus:ring-indigo-400 placeholder:text-slate-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Close Date</label>
+                  <input
+                    value={newCrFields.close_date}
+                    onChange={(e) => setNewCrFields((p) => ({ ...p, close_date: e.target.value }))}
+                    placeholder="YYYY-MM-DD"
+                    className="w-full rounded border border-white/[0.08] px-2.5 py-1.5 text-xs text-slate-200 bg-white/[0.04] focus:outline-none focus:ring-1 focus:ring-indigo-400 placeholder:text-slate-400"
+                  />
+                </div>
               </div>
               <div className="flex items-center gap-6 pt-1">
                 <label className="flex items-center gap-1.5 text-xs text-slate-300">

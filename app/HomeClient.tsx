@@ -80,31 +80,9 @@ export default function HomeClient({ initialClients, stats, userEmail }: { initi
     if (!hasWebhookAccess(userEmail)) return;
     setLoadingWebhooks(true);
     try {
-      const res = await fetch("/api/clients");
+      const res = await fetch("/api/webhook-apps");
       const data = await res.json();
-      if (data.clients) {
-        const apps: typeof webhookApps = [];
-        for (const client of data.clients) {
-          const profileRes = await fetch(`/api/clients/${client.clientId}`);
-          const profileData = await profileRes.json();
-          if (profileData.profile?.applications) {
-            for (const app of profileData.profile.applications) {
-              if (app.webhook_config) {
-                apps.push({
-                  clientId: client.clientId,
-                  clientName: client.clientName || profileData.profile.clientName,
-                  appId: app.id,
-                  appTitle: app.title,
-                  source: app.webhook_config.source,
-                  lastReceived: app.webhook_config.last_received_at,
-                  pendingCount: (app.pending_webhook_submissions ?? []).filter((p: { status: string }) => p.status === "pending").length,
-                });
-              }
-            }
-          }
-        }
-        setWebhookApps(apps);
-      }
+      if (data.apps) setWebhookApps(data.apps);
     } catch { /* ignore */ }
     finally { setLoadingWebhooks(false); }
   }
