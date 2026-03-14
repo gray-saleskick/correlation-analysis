@@ -21,6 +21,14 @@ Format: Use short paragraphs and bullet points. Bold key terms with **bold**. Ke
 Be concise and specific — reference specific grade thresholds, answer bucket scores, financial cutoffs, show/close rates by grade level, and recommendations from the audit. If the user asks about something not covered, say so rather than speculating. Keep responses focused and actionable.
 
 Format: Use short paragraphs and bullet points. Bold key terms with **bold**. Keep responses under 500 words unless the question genuinely requires more depth.`,
+
+  data: `You are an expert data analyst assistant for a lead correlation analysis platform. You have access to the full dataset and any AI-generated reports that have been run on it. Your job is to answer questions about the data — submissions, booking/show/close rates, financial records, grade distributions, and any patterns or insights.
+
+Be concise and specific — reference exact numbers, percentages, and data points. If the user asks about something not in the data, say so. Keep responses focused and actionable.
+
+When discussing correlations, always note the sample size so the user can judge statistical significance.
+
+Format: Use short paragraphs and bullet points. Bold key terms with **bold**. Keep responses under 500 words unless the question genuinely requires more depth.`,
 };
 
 export async function POST(
@@ -46,7 +54,7 @@ export async function POST(
       );
     }
 
-    if (!context || !["narrative", "audit", "grading_audit"].includes(context)) {
+    if (!context || !["narrative", "audit", "grading_audit", "data"].includes(context)) {
       return NextResponse.json(
         { success: false, error: "Invalid context. Must be 'narrative', 'audit', or 'grading_audit'." },
         { status: 400 }
@@ -71,8 +79,9 @@ export async function POST(
       narrative: "LEAD ANALYSIS",
       audit: "APPLICATION AUDIT",
       grading_audit: "GRADING AUDIT",
+      data: "DATA & REPORTS",
     };
-    const systemPrompt = `${SYSTEM_PROMPTS[context]}\n\n--- ORIGINAL ${contextLabels[context] ?? "ANALYSIS"} ---\n\n${systemContext}`;
+    const systemPrompt = `${SYSTEM_PROMPTS[context]}\n\n--- ${contextLabels[context] ?? "ANALYSIS"} ---\n\n${systemContext}`;
 
     const anthropic = new Anthropic({ apiKey });
     const message = await anthropic.messages.create({

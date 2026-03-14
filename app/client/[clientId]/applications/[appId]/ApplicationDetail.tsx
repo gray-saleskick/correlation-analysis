@@ -16,6 +16,7 @@ import type {
   FilterOperator,
   SavedCorrelationFilter,
   ChatMessage,
+  DataChat,
 } from "@/lib/types";
 import Link from "next/link";
 import {
@@ -1006,37 +1007,6 @@ function QuestionsTab({
   const [auditNotes, setAuditNotes] = useState(app.audit_client_notes ?? "");
   const [showAuditRegenConfirm, setShowAuditRegenConfirm] = useState(false);
 
-  // Audit chat state
-  const [auditChatInput, setAuditChatInput] = useState("");
-  const [auditChatMessages, setAuditChatMessages] = useState<ChatMessage[]>(app.audit_chat ?? []);
-  const [auditChatLoading, setAuditChatLoading] = useState(false);
-
-  async function sendAuditChat() {
-    const input = auditChatInput.trim();
-    if (!input || auditChatLoading || !app.audit_analysis) return;
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
-    // API key is optional — server uses ANTHROPIC_API_KEY env var as fallback
-    const userMsg: ChatMessage = { role: "user", content: input };
-    const updatedMessages = [...auditChatMessages, userMsg];
-    setAuditChatMessages(updatedMessages);
-    setAuditChatInput("");
-    setAuditChatLoading(true);
-    try {
-      const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, context: "audit", messages: updatedMessages, systemContext: app.audit_analysis }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const withReply: ChatMessage[] = [...updatedMessages, { role: "assistant", content: data.reply }];
-        setAuditChatMessages(withReply);
-        onSave({ ...app, audit_chat: withReply });
-      }
-    } catch { /* ignore */ }
-    finally { setAuditChatLoading(false); }
-  }
-
   async function generateAudit() {
     setAuditGenerating(true);
     setAuditError(null);
@@ -1057,10 +1027,8 @@ function QuestionsTab({
           audit_analysis: data.audit,
           audit_generated_at: data.generated_at,
           audit_client_notes: auditNotes.trim() || undefined,
-          audit_chat: undefined,
         });
         setAuditCollapsed(false);
-        setAuditChatMessages([]);
       } else {
         setAuditError(data.error || "Failed to generate audit.");
       }
@@ -1078,37 +1046,6 @@ function QuestionsTab({
   const [showGradingAuditNotes, setShowGradingAuditNotes] = useState(false);
   const [gradingAuditNotes, setGradingAuditNotes] = useState(app.grading_audit_client_notes ?? "");
   const [showGradingAuditRegenConfirm, setShowGradingAuditRegenConfirm] = useState(false);
-
-  // Grading Audit chat state
-  const [gradingAuditChatInput, setGradingAuditChatInput] = useState("");
-  const [gradingAuditChatMessages, setGradingAuditChatMessages] = useState<ChatMessage[]>(app.grading_audit_chat ?? []);
-  const [gradingAuditChatLoading, setGradingAuditChatLoading] = useState(false);
-
-  async function sendGradingAuditChat() {
-    const input = gradingAuditChatInput.trim();
-    if (!input || gradingAuditChatLoading || !app.grading_audit_analysis) return;
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
-    // API key is optional — server uses ANTHROPIC_API_KEY env var as fallback
-    const userMsg: ChatMessage = { role: "user", content: input };
-    const updatedMessages = [...gradingAuditChatMessages, userMsg];
-    setGradingAuditChatMessages(updatedMessages);
-    setGradingAuditChatInput("");
-    setGradingAuditChatLoading(true);
-    try {
-      const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, context: "grading_audit", messages: updatedMessages, systemContext: app.grading_audit_analysis }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const withReply: ChatMessage[] = [...updatedMessages, { role: "assistant", content: data.reply }];
-        setGradingAuditChatMessages(withReply);
-        onSave({ ...app, grading_audit_chat: withReply });
-      }
-    } catch { /* ignore */ }
-    finally { setGradingAuditChatLoading(false); }
-  }
 
   async function generateGradingAudit() {
     setGradingAuditGenerating(true);
@@ -1130,10 +1067,8 @@ function QuestionsTab({
           grading_audit_analysis: data.audit,
           grading_audit_generated_at: data.generated_at,
           grading_audit_client_notes: gradingAuditNotes.trim() || undefined,
-          grading_audit_chat: undefined,
         });
         setGradingAuditCollapsed(false);
-        setGradingAuditChatMessages([]);
       } else {
         setGradingAuditError(data.error || "Failed to generate grading audit.");
       }
@@ -1541,44 +1476,6 @@ function QuestionsTab({
               </div>
             )}
 
-            {/* Chat follow-up */}
-            {!auditGenerating && (
-              <div className="border-t border-white/[0.08] pt-3 mt-3 space-y-2">
-                {auditChatMessages.map((msg, i) => (
-                  <div key={i} className={`text-xs px-3 py-2 rounded-lg ${
-                    msg.role === "user"
-                      ? "ml-auto max-w-[85%] bg-indigo-500/20 text-slate-200"
-                      : "max-w-[90%] bg-white/[0.06] text-slate-300"
-                  }`}>
-                    <div className="whitespace-pre-line" dangerouslySetInnerHTML={{
-                      __html: msg.content.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-200 font-semibold">$1</strong>')
-                    }} />
-                  </div>
-                ))}
-                {auditChatLoading && (
-                  <div className="bg-white/[0.06] text-slate-400 text-xs px-3 py-2 rounded-lg w-fit animate-pulse">
-                    Thinking…
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <input
-                    value={auditChatInput}
-                    onChange={(e) => setAuditChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendAuditChat()}
-                    placeholder="Ask a follow-up question…"
-                    className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                  />
-                  <button
-                    onClick={sendAuditChat}
-                    disabled={auditChatLoading || !auditChatInput.trim()}
-                    className="px-3 py-1.5 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
-            )}
-
             {auditError && (
               <p className="text-xs text-red-400 mt-2">{auditError}</p>
             )}
@@ -1767,44 +1664,6 @@ function QuestionsTab({
                     </div>
                   );
                 })}
-              </div>
-            )}
-
-            {/* Chat follow-up */}
-            {!gradingAuditGenerating && (
-              <div className="border-t border-white/[0.08] pt-3 mt-3 space-y-2">
-                {gradingAuditChatMessages.map((msg, i) => (
-                  <div key={i} className={`text-xs px-3 py-2 rounded-lg ${
-                    msg.role === "user"
-                      ? "ml-auto max-w-[85%] bg-emerald-500/20 text-slate-200"
-                      : "max-w-[90%] bg-white/[0.06] text-slate-300"
-                  }`}>
-                    <div className="whitespace-pre-line" dangerouslySetInnerHTML={{
-                      __html: msg.content.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-200 font-semibold">$1</strong>')
-                    }} />
-                  </div>
-                ))}
-                {gradingAuditChatLoading && (
-                  <div className="bg-white/[0.06] text-slate-400 text-xs px-3 py-2 rounded-lg w-fit animate-pulse">
-                    Thinking…
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <input
-                    value={gradingAuditChatInput}
-                    onChange={(e) => setGradingAuditChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendGradingAuditChat()}
-                    placeholder="Ask a follow-up question…"
-                    className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                  />
-                  <button
-                    onClick={sendGradingAuditChat}
-                    disabled={gradingAuditChatLoading || !gradingAuditChatInput.trim()}
-                    className="px-3 py-1.5 text-xs font-semibold bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-40 transition-colors"
-                  >
-                    Send
-                  </button>
-                </div>
               </div>
             )}
 
@@ -4005,36 +3864,93 @@ function CorrelationTab({ app, onSave, clientName, clientId }: { app: Applicatio
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [narrativeCollapsed, setNarrativeCollapsed] = useState(false);
 
-  // Narrative chat state
-  const [narrativeChatInput, setNarrativeChatInput] = useState("");
-  const [narrativeChatMessages, setNarrativeChatMessages] = useState<ChatMessage[]>(app.narrative_chat ?? []);
-  const [narrativeChatLoading, setNarrativeChatLoading] = useState(false);
+  // ── Data Chat state ─────────────────────────────────────────────────────
+  const [dataChatOpen, setDataChatOpen] = useState(false);
+  const [activeChatId, setActiveChatId] = useState<string | null>(app.data_chats?.[0]?.id ?? null);
+  const [dataChatInput, setDataChatInput] = useState("");
+  const [dataChatLoading, setDataChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
-  async function sendNarrativeChat() {
-    const input = narrativeChatInput.trim();
-    if (!input || narrativeChatLoading || !app.narrative_analysis) return;
+  const dataChats = app.data_chats ?? [];
+  const activeChat = dataChats.find(c => c.id === activeChatId) ?? null;
+
+  function buildDataContext(): string {
+    const parts: string[] = [];
+    // Include generated reports
+    if (app.narrative_analysis) parts.push(`=== LEAD ANALYSIS (generated ${app.narrative_generated_at ?? "unknown"}) ===\n${app.narrative_analysis}`);
+    if (app.audit_analysis) parts.push(`=== APPLICATION AUDIT (generated ${app.audit_generated_at ?? "unknown"}) ===\n${app.audit_analysis}`);
+    if (app.grading_audit_analysis) parts.push(`=== GRADING AUDIT (generated ${app.grading_audit_generated_at ?? "unknown"}) ===\n${app.grading_audit_analysis}`);
+    // Data summary
+    const subs = app.submissions ?? [];
+    const bks = app.bookings ?? [];
+    const fins = app.financial_records ?? [];
+    const bkMap = new Map(bks.map(b => [b.email.toLowerCase(), b]));
+    const bookedN = subs.filter(s => s.respondent_email && bkMap.has(s.respondent_email.toLowerCase())).length;
+    const showedN = subs.filter(s => { const b = s.respondent_email ? bkMap.get(s.respondent_email.toLowerCase()) : undefined; return b?.showed; }).length;
+    const closedN = subs.filter(s => { const b = s.respondent_email ? bkMap.get(s.respondent_email.toLowerCase()) : undefined; return b?.closed; }).length;
+    parts.push(`=== DATA SUMMARY ===
+Total submissions: ${subs.length}
+Booked: ${bookedN} (${subs.length ? Math.round(bookedN / subs.length * 100) : 0}%)
+Showed: ${showedN} (${bookedN ? Math.round(showedN / bookedN * 100) : 0}% of booked)
+Closed: ${closedN} (${showedN ? Math.round(closedN / showedN * 100) : 0}% of showed)
+Financial records: ${fins.length}
+Booking records: ${bks.length}
+Questions: ${(app.questions ?? []).length}`);
+    // Question breakdown
+    if (app.questions?.length) {
+      parts.push("=== QUESTIONS ===\n" + app.questions.map(q => `• ${q.title} (${q.type})`).join("\n"));
+    }
+    return parts.join("\n\n");
+  }
+
+  function createNewChat() {
+    const id = crypto.randomUUID();
+    const newChat: DataChat = { id, title: "New Chat", messages: [], created_at: new Date().toISOString() };
+    const updated = [...dataChats, newChat];
+    onSave({ ...app, data_chats: updated });
+    setActiveChatId(id);
+    setDataChatInput("");
+  }
+
+  function deleteChat(chatId: string) {
+    const updated = dataChats.filter(c => c.id !== chatId);
+    onSave({ ...app, data_chats: updated.length > 0 ? updated : undefined });
+    if (activeChatId === chatId) setActiveChatId(updated[0]?.id ?? null);
+  }
+
+  async function sendDataChat() {
+    const input = dataChatInput.trim();
+    if (!input || dataChatLoading || !activeChat) return;
     const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
-    // API key is optional — server uses ANTHROPIC_API_KEY env var as fallback
     const userMsg: ChatMessage = { role: "user", content: input };
-    const updatedMessages = [...narrativeChatMessages, userMsg];
-    setNarrativeChatMessages(updatedMessages);
-    setNarrativeChatInput("");
-    setNarrativeChatLoading(true);
+    const updatedMessages = [...activeChat.messages, userMsg];
+    // Optimistically update
+    const updatedChats = dataChats.map(c => c.id === activeChatId ? { ...c, messages: updatedMessages } : c);
+    onSave({ ...app, data_chats: updatedChats });
+    setDataChatInput("");
+    setDataChatLoading(true);
     try {
       const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, context: "narrative", messages: updatedMessages, systemContext: app.narrative_analysis }),
+        body: JSON.stringify({ apiKey, context: "data", messages: updatedMessages, systemContext: buildDataContext() }),
       });
       const data = await res.json();
       if (data.success) {
         const withReply: ChatMessage[] = [...updatedMessages, { role: "assistant", content: data.reply }];
-        setNarrativeChatMessages(withReply);
-        onSave({ ...app, narrative_chat: withReply });
+        // Auto-title on first exchange
+        const isFirstExchange = activeChat.messages.length === 0;
+        const title = isFirstExchange ? input.slice(0, 60) + (input.length > 60 ? "…" : "") : activeChat.title;
+        const finalChats = dataChats.map(c => c.id === activeChatId ? { ...c, messages: withReply, title } : c);
+        onSave({ ...app, data_chats: finalChats });
       }
     } catch { /* ignore */ }
-    finally { setNarrativeChatLoading(false); }
+    finally { setDataChatLoading(false); }
   }
+
+  useEffect(() => {
+    if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+  }, [activeChat?.messages.length, dataChatLoading]);
 
   async function generateNarrative() {
     const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") : null;
@@ -4053,8 +3969,7 @@ function CorrelationTab({ app, onSave, clientName, clientId }: { app: Applicatio
       });
       const data = await res.json();
       if (data.success) {
-        onSave({ ...app, narrative_analysis: data.narrative, narrative_generated_at: data.generated_at, narrative_chat: undefined });
-        setNarrativeChatMessages([]);
+        onSave({ ...app, narrative_analysis: data.narrative, narrative_generated_at: data.generated_at });
       } else {
         setNarrativeError(data.error || "Failed to generate analysis.");
       }
@@ -4731,6 +4646,133 @@ function CorrelationTab({ app, onSave, clientName, clientId }: { app: Applicatio
         </div>
       </div>
 
+      {/* ── Chat with Your Data ────────────────────────────────────────────── */}
+      <div className="bg-white/[0.02] border border-white/[0.08] rounded-xl overflow-hidden">
+        <button
+          onClick={() => { setDataChatOpen(v => !v); if (!dataChatOpen && dataChats.length === 0) createNewChat(); }}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.03] transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <span className="text-sm font-semibold text-slate-200">Chat with Your Data</span>
+            {dataChats.length > 0 && (
+              <span className="text-[9px] font-bold bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded-full">{dataChats.length}</span>
+            )}
+          </div>
+          <svg className={`w-4 h-4 text-slate-400 transition-transform ${dataChatOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {dataChatOpen && (
+          <div className="border-t border-white/[0.06]">
+            <div className="flex" style={{ height: "420px" }}>
+              {/* Sidebar — chat list */}
+              <div className="w-48 shrink-0 border-r border-white/[0.06] flex flex-col bg-white/[0.02]">
+                <button
+                  onClick={createNewChat}
+                  className="flex items-center gap-1.5 px-3 py-2 text-[11px] font-semibold text-indigo-400 hover:bg-indigo-500/10 transition-colors border-b border-white/[0.06]"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  New Chat
+                </button>
+                <div className="flex-1 overflow-y-auto">
+                  {dataChats.map(chat => (
+                    <div
+                      key={chat.id}
+                      className={`group flex items-center gap-1 px-3 py-2 cursor-pointer transition-colors ${chat.id === activeChatId ? "bg-indigo-500/15 border-r-2 border-indigo-400" : "hover:bg-white/[0.04]"}`}
+                      onClick={() => setActiveChatId(chat.id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[11px] font-medium truncate ${chat.id === activeChatId ? "text-indigo-300" : "text-slate-300"}`}>{chat.title}</p>
+                        <p className="text-[9px] text-slate-500">{chat.messages.length} messages</p>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-red-400 transition-all"
+                        title="Delete chat"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Chat area */}
+              <div className="flex-1 flex flex-col min-w-0">
+                {activeChat ? (
+                  <>
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+                      {activeChat.messages.length === 0 && !dataChatLoading && (
+                        <div className="flex flex-col items-center justify-center h-full text-center">
+                          <svg className="w-8 h-8 text-slate-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                          </svg>
+                          <p className="text-xs text-slate-500">Ask anything about your data</p>
+                          <p className="text-[10px] text-slate-600 mt-1">
+                            {[app.narrative_analysis && "Lead Analysis", app.audit_analysis && "Audit", app.grading_audit_analysis && "Grading Audit"].filter(Boolean).length > 0
+                              ? `Context includes: ${[app.narrative_analysis && "Lead Analysis", app.audit_analysis && "Audit", app.grading_audit_analysis && "Grading Audit"].filter(Boolean).join(", ")}`
+                              : "Generate reports for richer context"}
+                          </p>
+                        </div>
+                      )}
+                      {activeChat.messages.map((msg, i) => (
+                        <div key={i} className={`text-xs px-3 py-2 rounded-lg ${
+                          msg.role === "user"
+                            ? "ml-auto max-w-[85%] bg-indigo-500/20 text-slate-200"
+                            : "max-w-[90%] bg-white/[0.06] text-slate-300"
+                        }`}>
+                          <div className="whitespace-pre-line" dangerouslySetInnerHTML={{
+                            __html: msg.content.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-200 font-semibold">$1</strong>')
+                          }} />
+                        </div>
+                      ))}
+                      {dataChatLoading && (
+                        <div className="bg-white/[0.06] text-slate-400 text-xs px-3 py-2 rounded-lg w-fit animate-pulse">
+                          Thinking…
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+                    {/* Input */}
+                    <div className="border-t border-white/[0.06] px-4 py-2">
+                      <div className="flex gap-2">
+                        <input
+                          value={dataChatInput}
+                          onChange={(e) => setDataChatInput(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendDataChat()}
+                          placeholder="Ask about your data…"
+                          className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                        <button
+                          onClick={sendDataChat}
+                          disabled={dataChatLoading || !dataChatInput.trim()}
+                          className="px-3 py-1.5 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors"
+                        >
+                          Send
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center">
+                    <p className="text-xs text-slate-500">Select a chat or create a new one</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {viewMode === "modern" && <div ref={correlationRef} className="space-y-8">
       {/* Overview stats — Radial Rings */}
       <section>
@@ -4906,44 +4948,6 @@ function CorrelationTab({ app, onSave, clientName, clientId }: { app: Applicatio
                     </div>
                   );
                 })}
-              </div>
-            )}
-
-            {/* Chat follow-up */}
-            {!narrativeGenerating && (
-              <div className="border-t border-white/[0.08] pt-3 mt-3 space-y-2">
-                {narrativeChatMessages.map((msg, i) => (
-                  <div key={i} className={`text-xs px-3 py-2 rounded-lg ${
-                    msg.role === "user"
-                      ? "ml-auto max-w-[85%] bg-indigo-500/20 text-slate-200"
-                      : "max-w-[90%] bg-white/[0.06] text-slate-300"
-                  }`}>
-                    <div className="whitespace-pre-line" dangerouslySetInnerHTML={{
-                      __html: msg.content.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-200 font-semibold">$1</strong>')
-                    }} />
-                  </div>
-                ))}
-                {narrativeChatLoading && (
-                  <div className="bg-white/[0.06] text-slate-400 text-xs px-3 py-2 rounded-lg w-fit animate-pulse">
-                    Thinking…
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <input
-                    value={narrativeChatInput}
-                    onChange={(e) => setNarrativeChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendNarrativeChat()}
-                    placeholder="Ask a follow-up question…"
-                    className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                  />
-                  <button
-                    onClick={sendNarrativeChat}
-                    disabled={narrativeChatLoading || !narrativeChatInput.trim()}
-                    className="px-3 py-1.5 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors"
-                  >
-                    Send
-                  </button>
-                </div>
               </div>
             )}
 

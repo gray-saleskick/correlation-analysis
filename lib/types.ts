@@ -108,6 +108,13 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface DataChat {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  created_at: string;
+}
+
 export interface Application {
   id: string;
   title: string;
@@ -143,6 +150,7 @@ export interface Application {
   grading_audit_generated_at?: string;
   grading_audit_client_notes?: string;
   grading_audit_chat?: ChatMessage[];
+  data_chats?: DataChat[];
 }
 
 // Correlation filter types
