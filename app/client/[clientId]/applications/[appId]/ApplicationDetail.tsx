@@ -3978,6 +3978,28 @@ function WebhooksTab({
   }
 
   function updateMappingTarget(sourceField: string, target: string) {
+    if (target === "__create_new__") {
+      const title = window.prompt("Enter new question title:");
+      if (!title?.trim()) return;
+      const trimmed = title.trim();
+      // Create the question on the app if it doesn't exist
+      const exists = app.questions.some(q => q.title.toLowerCase() === trimmed.toLowerCase());
+      if (!exists) {
+        const newQ: ApplicationQuestion = {
+          id: uid(),
+          title: trimmed,
+          type: "short_text",
+          required: false,
+          order: app.questions.length,
+        };
+        onSave({ ...app, questions: [...app.questions, newQ] });
+      }
+      // Set the mapping target to this question
+      setMappingEdits(prev =>
+        prev.map(m => m.source_field === sourceField ? { ...m, target: `answer:${trimmed}` } : m)
+      );
+      return;
+    }
     setMappingEdits(prev =>
       prev.map(m => m.source_field === sourceField ? { ...m, target } : m)
     );
@@ -4250,6 +4272,8 @@ function WebhooksTab({
                   {allTargets.map((t) => (
                     <option key={t.value} value={t.value}>{t.label}</option>
                   ))}
+                  <option disabled>──────────</option>
+                  <option value="__create_new__">+ Create New Question</option>
                 </select>
               </div>
             ))}
