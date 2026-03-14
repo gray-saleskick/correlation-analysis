@@ -68,7 +68,14 @@ export default function ClientDetailPage({ initialProfile }: { initialProfile: C
           applications: p.applications.filter((a) => a.id !== appId),
         }));
         setDeleteTarget(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        console.error("Delete failed:", res.status, data);
+        alert(`Failed to delete: ${data.error || res.statusText}`);
       }
+    } catch (err) {
+      console.error("Delete error:", err);
+      alert("Failed to delete application. Please try again.");
     } finally {
       setDeleting(false);
     }
