@@ -30,16 +30,18 @@ export async function POST(
   const { clientId, appId } = await params;
   try {
     const body = await req.json().catch(() => ({}));
-    const { apiKey, context, messages, systemContext } = body as {
+    const { apiKey: bodyApiKey, context, messages, systemContext } = body as {
       apiKey?: string;
       context?: string;
       messages?: { role: "user" | "assistant"; content: string }[];
       systemContext?: string;
     };
 
+    const apiKey = bodyApiKey || process.env.ANTHROPIC_API_KEY;
+
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "API key is required." },
+        { success: false, error: "API key is required. Set ANTHROPIC_API_KEY env var or add key in Settings." },
         { status: 400 }
       );
     }

@@ -371,11 +371,12 @@ export async function POST(
   const { clientId, appId } = await params;
   try {
     const body = await req.json().catch(() => ({}));
-    const { apiKey } = body as { apiKey?: string };
+    const { apiKey: bodyApiKey } = body as { apiKey?: string };
+    const apiKey = bodyApiKey || process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "API key is required. Add your Anthropic API key in Settings." },
+        { success: false, error: "API key is required. Set ANTHROPIC_API_KEY env var or add key in Settings." },
         { status: 400 }
       );
     }

@@ -146,7 +146,7 @@ export async function POST(
       questionChoices,
       templateId,
       companyDescription,
-      apiKey,
+      apiKey: bodyApiKey,
     } = body as {
       questionId?: string;
       questionRef?: string;
@@ -158,6 +158,8 @@ export async function POST(
       apiKey?: string;
     };
 
+    const apiKey = bodyApiKey || process.env.ANTHROPIC_API_KEY;
+
     if (!questionTitle || !templateId) {
       return NextResponse.json(
         { success: false, error: "questionTitle and templateId are required" },
@@ -167,7 +169,7 @@ export async function POST(
 
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "API key is required. Add your Anthropic API key in Settings on the home page." },
+        { success: false, error: "API key is required. Set ANTHROPIC_API_KEY env var or add key in Settings." },
         { status: 400 }
       );
     }

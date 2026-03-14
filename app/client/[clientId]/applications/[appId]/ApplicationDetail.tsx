@@ -1015,7 +1015,7 @@ function QuestionsTab({
     const input = auditChatInput.trim();
     if (!input || auditChatLoading || !app.audit_analysis) return;
     const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
-    if (!apiKey) return;
+    // API key is optional — server uses ANTHROPIC_API_KEY env var as fallback
     const userMsg: ChatMessage = { role: "user", content: input };
     const updatedMessages = [...auditChatMessages, userMsg];
     setAuditChatMessages(updatedMessages);
@@ -1088,7 +1088,7 @@ function QuestionsTab({
     const input = gradingAuditChatInput.trim();
     if (!input || gradingAuditChatLoading || !app.grading_audit_analysis) return;
     const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
-    if (!apiKey) return;
+    // API key is optional — server uses ANTHROPIC_API_KEY env var as fallback
     const userMsg: ChatMessage = { role: "user", content: input };
     const updatedMessages = [...gradingAuditChatMessages, userMsg];
     setGradingAuditChatMessages(updatedMessages);
@@ -4014,7 +4014,7 @@ function CorrelationTab({ app, onSave, clientName, clientId }: { app: Applicatio
     const input = narrativeChatInput.trim();
     if (!input || narrativeChatLoading || !app.narrative_analysis) return;
     const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
-    if (!apiKey) return;
+    // API key is optional — server uses ANTHROPIC_API_KEY env var as fallback
     const userMsg: ChatMessage = { role: "user", content: input };
     const updatedMessages = [...narrativeChatMessages, userMsg];
     setNarrativeChatMessages(updatedMessages);
