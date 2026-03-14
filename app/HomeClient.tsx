@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { AggregateStats } from "@/lib/store";
+import { hasWebhookAccess } from "@/lib/featureFlags";
 
 interface ClientSummary {
   clientId: string;
@@ -22,7 +23,7 @@ function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-export default function HomeClient({ initialClients, stats }: { initialClients: ClientSummary[]; stats: AggregateStats }) {
+export default function HomeClient({ initialClients, stats, userEmail }: { initialClients: ClientSummary[]; stats: AggregateStats; userEmail?: string }) {
   const [clients, setClients] = useState(initialClients);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -70,6 +71,48 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
   const [deleteUserTarget, setDeleteUserTarget] = useState<UserInfo | null>(null);
   const [deletingUser, setDeletingUser] = useState(false);
   const [deleteUserError, setDeleteUserError] = useState("");
+
+  // Webhook overview state
+  const [webhookApps, setWebhookApps] = useState<{clientId: string; clientName: string; appId: string; appTitle: string; source: string; lastReceived?: string; pendingCount: number}[]>([]);
+  const [loadingWebhooks, setLoadingWebhooks] = useState(false);
+
+  async function loadWebhookApps() {
+    if (!hasWebhookAccess(userEmail)) return;
+    setLoadingWebhooks(true);
+    try {
+      const res = await fetch("/api/clients");
+      const data = await res.json();
+      if (data.clients) {
+        const apps: typeof webhookApps = [];
+        for (const client of data.clients) {
+          const profileRes = await fetch(`/api/clients/${client.clientId}`);
+          const profileData = await profileRes.json();
+          if (profileData.profile?.applications) {
+            for (const app of profileData.profile.applications) {
+              if (app.webhook_config) {
+                apps.push({
+                  clientId: client.clientId,
+                  clientName: client.clientName || profileData.profile.clientName,
+                  appId: app.id,
+                  appTitle: app.title,
+                  source: app.webhook_config.source,
+                  lastReceived: app.webhook_config.last_received_at,
+                  pendingCount: (app.pending_webhook_submissions ?? []).filter((p: { status: string }) => p.status === "pending").length,
+                });
+              }
+            }
+          }
+        }
+        setWebhookApps(apps);
+      }
+    } catch { /* ignore */ }
+    finally { setLoadingWebhooks(false); }
+  }
+
+  useEffect(() => {
+    if (hasWebhookAccess(userEmail)) loadWebhookApps();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userEmail]);
 
   async function loadUsers() {
     setLoadingUsers(true);
@@ -397,6 +440,56 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
           </div>
         )}
       </div>
+
+      {/* ── Webhook Apps Overview (Admin Only) ── */}
+      {hasWebhookAccess(userEmail) && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-bold text-slate-300 uppercase tracking-widest">Webhook Applications</h2>
+            <span className="text-xs text-slate-500">
+              {loadingWebhooks ? "Loading..." : `${webhookApps.length} configured`}
+            </span>
+          </div>
+
+          {webhookApps.length === 0 && !loadingWebhooks ? (
+            <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-6 py-8 text-center">
+              <p className="text-slate-400 text-xs">No webhook-enabled applications yet. Set up webhooks from an application&apos;s Webhooks tab.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {webhookApps.map((wa) => (
+                <a
+                  key={`${wa.clientId}-${wa.appId}`}
+                  href={`/client/${wa.clientId}/applications/${wa.appId}`}
+                  className="group block bg-white/[0.04] hover:bg-white/[0.07] border border-white/[0.08] hover:border-white/[0.15] rounded-xl px-5 py-3.5 transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-200 group-hover:text-white transition-colors">
+                        {wa.appTitle}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {wa.clientName} · <span className="uppercase">{wa.source}</span>
+                        {wa.lastReceived && ` · Last: ${new Date(wa.lastReceived).toLocaleDateString()}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {wa.pendingCount > 0 && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                          {wa.pendingCount} pending
+                        </span>
+                      )}
+                      <svg className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Settings Modal */}
       {settingsOpen && (

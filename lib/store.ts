@@ -177,6 +177,29 @@ export async function getAggregateStats(): Promise<AggregateStats> {
   return stats;
 }
 
+export async function findApplicationByWebhookToken(
+  token: string
+): Promise<{ clientId: string; appIndex: number; profile: ClientProfile } | null> {
+  const { data, error } = await supabase
+    .from("clients")
+    .select("client_id, profile")
+    .neq("client_id", "__users__");
+
+  if (error || !data) return null;
+
+  for (const row of data) {
+    const profile = row.profile as ClientProfile;
+    const appIndex = profile.applications.findIndex(
+      (app) => app.webhook_config?.token === token
+    );
+    if (appIndex >= 0) {
+      return { clientId: profile.clientId, appIndex, profile };
+    }
+  }
+
+  return null;
+}
+
 export async function deleteClient(clientId: string): Promise<boolean> {
   if (!isValidId(clientId)) return false;
 

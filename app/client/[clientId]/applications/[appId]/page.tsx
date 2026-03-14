@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { readProfile } from "@/lib/store";
+import { getSession } from "@/lib/auth";
 import ApplicationDetail from "./ApplicationDetail";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,10 @@ interface PageProps {
 
 export default async function ApplicationDetailPage({ params }: PageProps) {
   const { clientId, appId } = await params;
-  const profile = await readProfile(clientId);
+  const [profile, session] = await Promise.all([
+    readProfile(clientId),
+    getSession(),
+  ]);
   if (!profile) notFound();
 
   const app = profile.applications.find((a) => a.id === appId);
@@ -22,6 +26,7 @@ export default async function ApplicationDetailPage({ params }: PageProps) {
       clientName={profile.clientName}
       companyDescription={profile.company_description ?? ""}
       initialApp={app}
+      userEmail={session?.email}
     />
   );
 }

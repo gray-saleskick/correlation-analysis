@@ -122,6 +122,8 @@ export function autoDetectTarget(
   if (n === "showed" || n === "show" || lower === "did show") return "booking.showed";
   if (n === "closed" || n === "close" || lower === "did close") return "booking.closed";
   if (n === "booked" || n === "book" || lower === "did book") return "booking.booked";
+  if (lower === "close date" || lower === "close_date" || lower === "closedate" || lower === "closed date" || lower === "closed_date") return "close_date";
+  if (lower === "booking date" || lower === "booking_date" || lower === "bookingdate") return "booking_date";
 
   // Financial record targets
   if (lower === "credit score" || lower === "credit_score") return "financial.credit_score";

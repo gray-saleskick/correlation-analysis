@@ -98,6 +98,7 @@ export interface FinancialRecord {
 export interface CallResultRecord {
   email: string;
   booking_date?: string;
+  close_date?: string;
   booked: boolean;
   showed: boolean;
   closed: boolean;
@@ -153,6 +154,44 @@ export interface Application {
   data_chats?: DataChat[];
   share_token?: string;
   share_enabled?: boolean;
+  webhook_config?: WebhookConfig;
+  pending_webhook_submissions?: PendingWebhookSubmission[];
+}
+
+// Webhook types
+
+export interface WebhookFieldMapping {
+  source_field: string;
+  target: string;
+}
+
+export interface CalculatedField {
+  id: string;
+  name: string;
+  type: "date_diff_days" | "math";
+  expression: string;
+  source_fields: string[];
+  target: string;
+}
+
+export interface WebhookConfig {
+  enabled: boolean;
+  token: string;
+  source: "typeform" | "zapier" | "generic";
+  field_mapping: WebhookFieldMapping[];
+  calculated_fields?: CalculatedField[];
+  last_received_at?: string;
+  last_field_signature?: string;
+  created_at: string;
+}
+
+export interface PendingWebhookSubmission {
+  id: string;
+  received_at: string;
+  raw_payload: Record<string, unknown>;
+  source: string;
+  status: "pending" | "rejected";
+  reason?: string;
 }
 
 // Correlation filter types

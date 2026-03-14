@@ -25,15 +25,23 @@ import {
   parseBoolValue,
   parseDollarAmount,
   extractUniqueValues,
+  autoDetectTarget,
 } from "@/lib/csvUtils";
+import { hasWebhookAccess } from "@/lib/featureFlags";
+import type {
+  WebhookConfig,
+  WebhookFieldMapping,
+  PendingWebhookSubmission,
+  CalculatedField,
+} from "@/lib/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabId = "questions" | "submissions" | "financial" | "call_results" | "correlation";
+type TabId = "questions" | "submissions" | "financial" | "call_results" | "correlation" | "webhooks";
 
-const TABS: { id: TabId; label: string }[] = [
+const BASE_TABS: { id: TabId; label: string }[] = [
   { id: "questions", label: "Questions" },
   { id: "submissions", label: "Submissions" },
   { id: "financial", label: "Financial Data" },
@@ -163,11 +171,13 @@ export default function ApplicationDetail({
   clientName,
   companyDescription,
   initialApp,
+  userEmail,
 }: {
   clientId: string;
   clientName: string;
   companyDescription: string;
   initialApp: Application;
+  userEmail?: string;
 }) {
   const [app, setApp] = useState(initialApp);
   const [activeTab, setActiveTab] = useState<TabId>("questions");
@@ -262,40 +272,54 @@ export default function ApplicationDetail({
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-white/[0.08] mb-6 bg-white/[0.02] rounded-t-lg px-1">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2.5 text-xs font-semibold transition-colors whitespace-nowrap border-b-2 -mb-px ${
-              activeTab === tab.id
-                ? "border-indigo-400 text-indigo-400"
-                : "border-transparent text-slate-300 hover:text-slate-300"
-            }`}
-          >
-            {tab.label}
-            {tab.id === "submissions" && (app.submissions?.length ?? 0) > 0 && (
-              <span className="ml-1.5 text-[10px] bg-white/[0.08] text-slate-300 rounded-full px-1.5 py-0.5">
-                {app.submissions!.length}
-              </span>
-            )}
-            {tab.id === "financial" && (app.financial_records?.length ?? 0) > 0 && (
-              <span className="ml-1.5 text-[10px] bg-white/[0.08] text-slate-300 rounded-full px-1.5 py-0.5">
-                {app.financial_records!.length}
-              </span>
-            )}
-            {tab.id === "call_results" && (app.call_results?.length ?? 0) > 0 && (
-              <span className="ml-1.5 text-[10px] bg-white/[0.08] text-slate-300 rounded-full px-1.5 py-0.5">
-                {app.call_results!.length}
-              </span>
-            )}
-          </button>
-        ))}
+        {(() => {
+          const tabs = hasWebhookAccess(userEmail)
+            ? [...BASE_TABS.slice(0, -1), { id: "webhooks" as TabId, label: "Webhooks" }, BASE_TABS[BASE_TABS.length - 1]]
+            : BASE_TABS;
+          return tabs.map((tab) => {
+            const pendingCount = app.pending_webhook_submissions?.filter(p => p.status === "pending").length ?? 0;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2.5 text-xs font-semibold transition-colors whitespace-nowrap border-b-2 -mb-px ${
+                  activeTab === tab.id
+                    ? "border-indigo-400 text-indigo-400"
+                    : "border-transparent text-slate-300 hover:text-slate-300"
+                }`}
+              >
+                {tab.label}
+                {tab.id === "submissions" && (app.submissions?.length ?? 0) > 0 && (
+                  <span className="ml-1.5 text-[10px] bg-white/[0.08] text-slate-300 rounded-full px-1.5 py-0.5">
+                    {app.submissions!.length}
+                  </span>
+                )}
+                {tab.id === "financial" && (app.financial_records?.length ?? 0) > 0 && (
+                  <span className="ml-1.5 text-[10px] bg-white/[0.08] text-slate-300 rounded-full px-1.5 py-0.5">
+                    {app.financial_records!.length}
+                  </span>
+                )}
+                {tab.id === "call_results" && (app.call_results?.length ?? 0) > 0 && (
+                  <span className="ml-1.5 text-[10px] bg-white/[0.08] text-slate-300 rounded-full px-1.5 py-0.5">
+                    {app.call_results!.length}
+                  </span>
+                )}
+                {tab.id === "webhooks" && pendingCount > 0 && (
+                  <span className="ml-1.5 text-[10px] bg-amber-500/20 text-amber-400 rounded-full px-1.5 py-0.5">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            );
+          });
+        })()}
       </div>
 
       {activeTab === "questions" && <QuestionsTab app={app} onSave={saveApp} clientId={clientId} companyDescription={companyDescription} />}
       {activeTab === "submissions" && <SubmissionsUploadTab app={app} onSave={saveApp} uploadType="submissions" />}
       {activeTab === "financial" && <FinancialUploadTab app={app} onSave={saveApp} />}
       {activeTab === "call_results" && <CallResultsUploadTab app={app} onSave={saveApp} />}
+      {activeTab === "webhooks" && <WebhooksTab app={app} onSave={saveApp} clientId={clientId} />}
       {activeTab === "correlation" && <CorrelationTab app={app} onSave={saveApp} clientName={clientName} clientId={clientId} />}
 
       {/* Custom Confirmation Modal */}
@@ -3811,6 +3835,487 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ── Webhooks Tab ──────────────────────────────────────────────────────────────
+
+// All mapping targets for the webhook field mapping dropdown
+const WEBHOOK_MAPPING_TARGETS = [
+  { value: "skip", label: "— Skip —" },
+  { value: "email", label: "Email" },
+  { value: "first_name", label: "First Name" },
+  { value: "last_name", label: "Last Name" },
+  { value: "full_name", label: "Full Name" },
+  { value: "submitted_at", label: "Submitted At" },
+  { value: "booking_date", label: "Booking Date" },
+  { value: "close_date", label: "Close Date" },
+  { value: "booking.booked", label: "Booked (Yes/No)" },
+  { value: "booking.showed", label: "Showed (Yes/No)" },
+  { value: "booking.closed", label: "Closed (Yes/No)" },
+  { value: "grade.final", label: "Final Grade" },
+  { value: "grade.answer", label: "Answer Grade" },
+  { value: "grade.financial", label: "Financial Grade" },
+  { value: "grade.disqualified", label: "Was Disqualified" },
+  { value: "grade.spam", label: "Was Spam" },
+  { value: "grade.details", label: "Grade Details" },
+  { value: "financial.credit_score", label: "Credit Score" },
+  { value: "financial.estimated_income", label: "Estimated Income" },
+  { value: "financial.available_credit", label: "Available Credit" },
+  { value: "financial.available_funding", label: "Available Funding" },
+  { value: "financial.grade", label: "Financial Grade (Record)" },
+];
+
+function WebhooksTab({
+  app,
+  onSave,
+  clientId,
+}: {
+  app: Application;
+  onSave: (a: Application) => void;
+  clientId: string;
+}) {
+  const config = app.webhook_config;
+  const pending = (app.pending_webhook_submissions ?? []).filter(p => p.status === "pending");
+  const [creating, setCreating] = useState(false);
+  const [savingMapping, setSavingMapping] = useState(false);
+  const [mappingEdits, setMappingEdits] = useState<WebhookFieldMapping[]>(config?.field_mapping ?? []);
+  const [processingPendingId, setProcessingPendingId] = useState<string | null>(null);
+  const [showCalcForm, setShowCalcForm] = useState(false);
+  const [newCalcName, setNewCalcName] = useState("");
+  const [newCalcType, setNewCalcType] = useState<"date_diff_days" | "math">("date_diff_days");
+  const [newCalcExpr, setNewCalcExpr] = useState("");
+  const [newCalcTarget, setNewCalcTarget] = useState("");
+
+  // Sync mapping edits when config changes
+  useEffect(() => {
+    setMappingEdits(config?.field_mapping ?? []);
+  }, [config?.field_mapping]);
+
+  const webhookUrl = config?.token
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/api/webhook/${config.token}`
+    : "";
+
+  async function createWebhook(source: "typeform" | "generic") {
+    setCreating(true);
+    try {
+      const token = crypto.randomUUID();
+      const newConfig: WebhookConfig = {
+        enabled: true,
+        token,
+        source,
+        field_mapping: [],
+        created_at: new Date().toISOString(),
+      };
+      const updated = { ...app, webhook_config: newConfig };
+      onSave(updated);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function toggleWebhook() {
+    if (!config) return;
+    const updated = {
+      ...app,
+      webhook_config: { ...config, enabled: !config.enabled },
+    };
+    onSave(updated);
+  }
+
+  async function deleteWebhook() {
+    const updated = { ...app };
+    delete updated.webhook_config;
+    updated.pending_webhook_submissions = [];
+    onSave(updated);
+  }
+
+  function updateMappingTarget(sourceField: string, target: string) {
+    setMappingEdits(prev =>
+      prev.map(m => m.source_field === sourceField ? { ...m, target } : m)
+    );
+  }
+
+  async function saveMapping() {
+    if (!config) return;
+    setSavingMapping(true);
+    try {
+      const updated = {
+        ...app,
+        webhook_config: { ...config, field_mapping: mappingEdits },
+      };
+      onSave(updated);
+    } finally {
+      setSavingMapping(false);
+    }
+  }
+
+  function autoDetectMappings() {
+    const questionTitles = app.questions.map(q => q.title);
+    setMappingEdits(prev =>
+      prev.map(m => ({
+        ...m,
+        target: autoDetectTarget(m.source_field, questionTitles),
+      }))
+    );
+  }
+
+  async function acceptPending(pendingItem: PendingWebhookSubmission) {
+    setProcessingPendingId(pendingItem.id);
+    try {
+      // Extract fields from raw payload and add to mapping if needed
+      const payloadKeys = Object.keys(
+        typeof pendingItem.raw_payload === "object" ? pendingItem.raw_payload : {}
+      );
+
+      const existingSourceFields = new Set(mappingEdits.map(m => m.source_field));
+      const newMappings = [...mappingEdits];
+      for (const key of payloadKeys) {
+        if (!existingSourceFields.has(key)) {
+          newMappings.push({
+            source_field: key,
+            target: autoDetectTarget(key, app.questions.map(q => q.title)),
+          });
+        }
+      }
+
+      // Remove this pending item
+      const updatedPending = (app.pending_webhook_submissions ?? []).filter(
+        p => p.id !== pendingItem.id
+      );
+
+      const updated = {
+        ...app,
+        webhook_config: config
+          ? { ...config, field_mapping: newMappings }
+          : undefined,
+        pending_webhook_submissions: updatedPending,
+      };
+      setMappingEdits(newMappings);
+      onSave(updated);
+    } finally {
+      setProcessingPendingId(null);
+    }
+  }
+
+  function rejectPending(pendingId: string) {
+    const updatedPending = (app.pending_webhook_submissions ?? []).filter(
+      p => p.id !== pendingId
+    );
+    const updated = { ...app, pending_webhook_submissions: updatedPending };
+    onSave(updated);
+  }
+
+  function addCalculatedField() {
+    if (!newCalcName || !newCalcExpr || !newCalcTarget || !config) return;
+    const newField: CalculatedField = {
+      id: uid(),
+      name: newCalcName,
+      type: newCalcType,
+      expression: newCalcExpr,
+      source_fields: newCalcExpr.split(/[+\-*/]/).map(s => s.trim()).filter(Boolean),
+      target: newCalcTarget,
+    };
+    const updated = {
+      ...app,
+      webhook_config: {
+        ...config,
+        calculated_fields: [...(config.calculated_fields ?? []), newField],
+      },
+    };
+    onSave(updated);
+    setNewCalcName("");
+    setNewCalcExpr("");
+    setNewCalcTarget("");
+    setShowCalcForm(false);
+  }
+
+  function removeCalculatedField(id: string) {
+    if (!config) return;
+    const updated = {
+      ...app,
+      webhook_config: {
+        ...config,
+        calculated_fields: (config.calculated_fields ?? []).filter(f => f.id !== id),
+      },
+    };
+    onSave(updated);
+  }
+
+  // Build answer targets from existing questions
+  const answerTargets = app.questions.map(q => ({
+    value: `answer:${q.title}`,
+    label: `Answer: ${q.title}`,
+  }));
+  const allTargets = [...WEBHOOK_MAPPING_TARGETS, ...answerTargets];
+
+  // ── No webhook configured ─────────────────────────────────────────────
+  if (!config) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-8 text-center">
+          <div className="text-3xl mb-3">🔗</div>
+          <h3 className="text-base font-semibold text-slate-200 mb-2">Set Up a Webhook</h3>
+          <p className="text-sm text-slate-400 mb-6 max-w-md mx-auto">
+            Receive data automatically from Typeform, Zapier, or any tool that can send webhooks.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => createWebhook("typeform")}
+              disabled={creating}
+              className="px-5 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors disabled:opacity-50"
+            >
+              Connect Typeform
+            </button>
+            <button
+              onClick={() => createWebhook("generic")}
+              disabled={creating}
+              className="px-5 py-2.5 text-sm font-semibold rounded-lg border border-white/[0.15] text-slate-200 hover:bg-white/[0.05] transition-colors disabled:opacity-50"
+            >
+              Generic / Zapier Webhook
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Webhook configured ────────────────────────────────────────────────
+  return (
+    <div className="space-y-6">
+      {/* Section A: Status Card */}
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${config.enabled ? "bg-emerald-400" : "bg-slate-500"}`} />
+            <h3 className="text-sm font-semibold text-slate-200">
+              {config.source === "typeform" ? "Typeform" : "Generic"} Webhook
+            </h3>
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/[0.08] text-slate-300 uppercase">
+              {config.source}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleWebhook}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+                config.enabled
+                  ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20"
+                  : "border-white/[0.1] text-slate-400 hover:bg-white/[0.05]"
+              }`}
+            >
+              {config.enabled ? "Enabled" : "Disabled"}
+            </button>
+            <button
+              onClick={deleteWebhook}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-black/30 rounded-lg p-3 mb-3">
+          <div className="flex items-center gap-2">
+            <code className="text-xs text-slate-300 flex-1 break-all select-all">{webhookUrl}</code>
+            <button
+              onClick={() => navigator.clipboard.writeText(webhookUrl)}
+              className="px-2 py-1 text-[10px] font-semibold rounded bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] transition-colors flex-shrink-0"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-4 text-xs text-slate-400">
+          {config.last_received_at && (
+            <span>Last received: {new Date(config.last_received_at).toLocaleString()}</span>
+          )}
+          <span>Created: {new Date(config.created_at).toLocaleString()}</span>
+          <span>Mappings: {config.field_mapping.length}</span>
+        </div>
+      </div>
+
+      {/* Section B: Field Mapping */}
+      {mappingEdits.length > 0 && (
+        <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-slate-200">Field Mapping</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={autoDetectMappings}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-white/[0.1] text-slate-300 hover:bg-white/[0.05] transition-colors"
+              >
+                Auto-Detect
+              </button>
+              <button
+                onClick={saveMapping}
+                disabled={savingMapping}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors disabled:opacity-50"
+              >
+                {savingMapping ? "Saving..." : "Save Mapping"}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="grid grid-cols-[1fr,24px,1fr] gap-2 px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase">
+              <span>Source Field</span>
+              <span />
+              <span>Target</span>
+            </div>
+            {mappingEdits.map((m) => (
+              <div key={m.source_field} className="grid grid-cols-[1fr,24px,1fr] gap-2 items-center px-3 py-2 bg-white/[0.02] rounded-lg">
+                <span className="text-xs text-slate-300 truncate" title={m.source_field}>{m.source_field}</span>
+                <span className="text-xs text-slate-500 text-center">→</span>
+                <select
+                  value={m.target}
+                  onChange={(e) => updateMappingTarget(m.source_field, e.target.value)}
+                  className="w-full bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
+                >
+                  {allTargets.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Section C: Pending Submissions */}
+      {pending.length > 0 && (
+        <div className="bg-white/[0.03] border border-amber-500/20 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-amber-400 mb-4">
+            Pending Submissions ({pending.length})
+          </h3>
+          <div className="space-y-3">
+            {pending.map((p) => (
+              <div key={p.id} className="bg-black/20 rounded-lg p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <span className="text-xs text-slate-400">
+                      {new Date(p.received_at).toLocaleString()}
+                    </span>
+                    {p.reason && (
+                      <p className="text-xs text-amber-400/80 mt-1">{p.reason}</p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => acceptPending(p)}
+                      disabled={processingPendingId === p.id}
+                      className="px-3 py-1 text-xs font-semibold rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-colors disabled:opacity-50"
+                    >
+                      {processingPendingId === p.id ? "Processing..." : "Accept & Map"}
+                    </button>
+                    <button
+                      onClick={() => rejectPending(p.id)}
+                      className="px-3 py-1 text-xs font-semibold rounded-lg bg-red-600/10 text-red-400 border border-red-500/30 hover:bg-red-600/20 transition-colors"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+                <pre className="text-[10px] text-slate-400 bg-black/30 rounded p-2 max-h-32 overflow-auto">
+                  {JSON.stringify(p.raw_payload, null, 2).slice(0, 1000)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Section D: Calculated Fields */}
+      <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-slate-200">Calculated Fields</h3>
+          <button
+            onClick={() => setShowCalcForm(!showCalcForm)}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-white/[0.1] text-slate-300 hover:bg-white/[0.05] transition-colors"
+          >
+            {showCalcForm ? "Cancel" : "+ Add"}
+          </button>
+        </div>
+
+        {showCalcForm && (
+          <div className="bg-black/20 rounded-lg p-4 mb-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Name</label>
+                <input
+                  value={newCalcName}
+                  onChange={(e) => setNewCalcName(e.target.value)}
+                  placeholder="e.g., Days to Close"
+                  className="w-full bg-white/[0.06] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Type</label>
+                <select
+                  value={newCalcType}
+                  onChange={(e) => setNewCalcType(e.target.value as "date_diff_days" | "math")}
+                  className="w-full bg-white/[0.06] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
+                >
+                  <option value="date_diff_days">Date Difference (Days)</option>
+                  <option value="math">Math Expression</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                Expression {newCalcType === "date_diff_days" ? "(field1 - field2)" : "(field1 + field2 * 0.5)"}
+              </label>
+              <input
+                value={newCalcExpr}
+                onChange={(e) => setNewCalcExpr(e.target.value)}
+                placeholder={newCalcType === "date_diff_days" ? "close_date - booking_date" : "field1 + field2"}
+                className="w-full bg-white/[0.06] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Store As</label>
+              <input
+                value={newCalcTarget}
+                onChange={(e) => setNewCalcTarget(e.target.value)}
+                placeholder="answer:Days to Close"
+                className="w-full bg-white/[0.06] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
+              />
+            </div>
+            <button
+              onClick={addCalculatedField}
+              disabled={!newCalcName || !newCalcExpr || !newCalcTarget}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors disabled:opacity-50"
+            >
+              Add Calculated Field
+            </button>
+          </div>
+        )}
+
+        {(config.calculated_fields ?? []).length > 0 ? (
+          <div className="space-y-2">
+            {(config.calculated_fields ?? []).map((f) => (
+              <div key={f.id} className="flex items-center justify-between bg-white/[0.02] rounded-lg px-3 py-2">
+                <div>
+                  <span className="text-xs font-semibold text-slate-200">{f.name}</span>
+                  <span className="ml-2 text-[10px] text-slate-400">
+                    {f.type === "date_diff_days" ? "📅" : "🔢"} {f.expression} → {f.target}
+                  </span>
+                </div>
+                <button
+                  onClick={() => removeCalculatedField(f.id)}
+                  className="text-xs text-red-400 hover:text-red-300"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500">No calculated fields yet. Add one to compute derived values from webhook data.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Correlation Analysis Tab
 // ─────────────────────────────────────────────────────────────────────────────
 

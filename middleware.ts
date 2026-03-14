@@ -6,6 +6,7 @@ const PUBLIC_PATHS = [
   "/api/auth/login",
   "/share/",
   "/api/share/",
+  "/api/webhook/",
 ];
 
 const STATIC_PREFIXES = [
