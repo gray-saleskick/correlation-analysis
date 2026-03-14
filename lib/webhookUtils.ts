@@ -60,14 +60,17 @@ export function computeFieldSignature(fields: string[]): string {
 
 /**
  * Check if fields have drifted from a stored signature.
- * Returns true if drifted (or if no previous signature exists).
+ * Returns true only if NEW fields appear that weren't in the previous signature.
+ * Missing/absent fields are allowed (optional fields in payloads).
+ * Returns true if no previous signature exists (first reception).
  */
 export function hasFieldDrift(
   currentFields: string[],
   storedSignature: string | undefined
 ): boolean {
   if (!storedSignature) return true; // First reception
-  return computeFieldSignature(currentFields) !== storedSignature;
+  const knownFields = new Set(storedSignature.split("|"));
+  return currentFields.some((f) => !knownFields.has(f));
 }
 
 // ── Typeform payload parsing ────────────────────────────────────────────────
@@ -85,6 +88,7 @@ interface TypeformAnswer {
   file_url?: string;
   choice?: { label: string };
   choices?: { labels: string[] };
+  payment?: { amount: number; last4?: string; name?: string };
 }
 
 interface TypeformField {
@@ -159,7 +163,7 @@ export function parseTypeformPayload(
         case "url":
           value = answer.url ?? "";
           break;
-        case "file_url":
+        case "file_upload":
           value = answer.file_url ?? "";
           break;
         case "choice":
@@ -168,8 +172,18 @@ export function parseTypeformPayload(
         case "choices":
           value = answer.choices?.labels?.join(", ") ?? "";
           break;
+        case "rating":
+        case "opinion_scale":
+        case "nps":
+          value = answer.number !== undefined ? String(answer.number) : "";
+          break;
+        case "payment":
+          value = answer.payment?.amount !== undefined
+            ? String(answer.payment.amount)
+            : "";
+          break;
         default:
-          value = answer.text ?? "";
+          value = answer.text ?? (answer.number !== undefined ? String(answer.number) : "");
       }
 
       fieldMap.set(title, value);

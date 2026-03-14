@@ -37,7 +37,7 @@ export async function POST(
 
     // Parse body
     const body = await req.json().catch(() => null);
-    if (!body || typeof body !== "object") {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
@@ -57,7 +57,6 @@ export async function POST(
     }
 
     const incomingFields = Object.keys(flatPayload);
-    const incomingSignature = computeFieldSignature(incomingFields);
 
     // Update last_received_at
     config.last_received_at = new Date().toISOString();
@@ -66,6 +65,13 @@ export async function POST(
     const hasMappings = config.field_mapping.length > 0;
     const drifted = hasMappings && hasFieldDrift(incomingFields, config.last_field_signature);
     const isFirstReception = !config.last_field_signature;
+
+    // Build cumulative signature (union of known + incoming fields)
+    const knownFields = config.last_field_signature
+      ? new Set(config.last_field_signature.split("|"))
+      : new Set<string>();
+    for (const f of incomingFields) knownFields.add(f);
+    const cumulativeSignature = computeFieldSignature(Array.from(knownFields));
 
     if (!hasMappings || drifted || isFirstReception) {
       // Buffer as pending
@@ -77,7 +83,9 @@ export async function POST(
         status: "pending",
         reason: isFirstReception
           ? "Initial reception — field mapping required"
-          : "Field structure changed — mapping review required",
+          : !hasMappings
+            ? "No field mapping configured"
+            : "New fields detected — mapping review required",
       };
 
       if (!app.pending_webhook_submissions) {
@@ -91,7 +99,7 @@ export async function POST(
       }
 
       // Always update signature so subsequent identical payloads aren't re-flagged
-      config.last_field_signature = incomingSignature;
+      config.last_field_signature = cumulativeSignature;
 
       profile.applications[appIndex] = app;
       await writeProfile(profile.clientId, profile);
@@ -123,7 +131,7 @@ export async function POST(
 
     // Preserve config changes
     updatedApp.webhook_config = config;
-    config.last_field_signature = incomingSignature;
+    config.last_field_signature = cumulativeSignature;
 
     profile.applications[appIndex] = updatedApp;
     await writeProfile(profile.clientId, profile);
