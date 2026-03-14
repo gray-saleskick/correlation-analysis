@@ -4,8 +4,9 @@ import ClientDetailPage from "./ClientDetailPage";
 
 export const dynamic = "force-dynamic";
 
-export default async function Page({ params }: { params: { clientId: string } }) {
-  const profile = await readProfile(params.clientId);
+export default async function Page({ params }: { params: Promise<{ clientId: string }> }) {
+  const { clientId } = await params;
+  const profile = await readProfile(clientId);
   if (!profile) notFound();
 
   return <ClientDetailPage initialProfile={profile} />;
