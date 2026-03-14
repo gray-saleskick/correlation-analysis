@@ -180,24 +180,23 @@ export async function getAggregateStats(): Promise<AggregateStats> {
 export async function findApplicationByWebhookToken(
   token: string
 ): Promise<{ clientId: string; appIndex: number; profile: ClientProfile } | null> {
+  // Use JSONB containment (@>) to search server-side instead of loading all rows
   const { data, error } = await supabase
     .from("clients")
     .select("client_id, profile")
-    .neq("client_id", "__users__");
+    .neq("client_id", "__users__")
+    .contains("profile", { applications: [{ webhook_config: { token } }] })
+    .maybeSingle();
 
   if (error || !data) return null;
 
-  for (const row of data) {
-    const profile = row.profile as ClientProfile;
-    const appIndex = profile.applications.findIndex(
-      (app) => app.webhook_config?.token === token
-    );
-    if (appIndex >= 0) {
-      return { clientId: profile.clientId, appIndex, profile };
-    }
-  }
+  const profile = data.profile as ClientProfile;
+  const appIndex = profile.applications.findIndex(
+    (app) => app.webhook_config?.token === token
+  );
+  if (appIndex < 0) return null;
 
-  return null;
+  return { clientId: profile.clientId, appIndex, profile };
 }
 
 export async function deleteClient(clientId: string): Promise<boolean> {
