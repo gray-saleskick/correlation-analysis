@@ -4032,60 +4032,80 @@ function WebhooksTab({
   async function acceptPending(pendingItem: PendingWebhookSubmission) {
     setProcessingPendingId(pendingItem.id);
     try {
-      // Flatten payload properly based on source type
-      let flatPayload: Record<string, string>;
-      let submittedAt: string | undefined;
+      const questionTitles = app.questions.map(q => q.title);
 
-      if (config?.source === "typeform") {
-        const parsed = parseTypeformPayload(pendingItem.raw_payload);
-        if (parsed) {
-          flatPayload = parsed.fields;
-          submittedAt = parsed.meta.submitted_at;
-        } else {
-          flatPayload = flattenPayload(pendingItem.raw_payload);
+      // Helper: flatten a pending item's payload
+      const flattenPendingItem = (item: PendingWebhookSubmission): {
+        flat: Record<string, string>;
+        submittedAt?: string;
+      } => {
+        if (config?.source === "typeform") {
+          const parsed = parseTypeformPayload(item.raw_payload);
+          if (parsed) return { flat: parsed.fields, submittedAt: parsed.meta.submitted_at };
         }
-      } else {
-        flatPayload = flattenPayload(pendingItem.raw_payload);
-      }
+        return { flat: flattenPayload(item.raw_payload) };
+      };
 
-      const payloadKeys = Object.keys(flatPayload);
-
-      // Add new fields to mapping (preserve existing)
+      // Step 1: Build mapping from the clicked item (adds any new fields)
+      const { flat: clickedFlat, submittedAt: clickedSubmittedAt } = flattenPendingItem(pendingItem);
       const existingSourceFields = new Set(mappingEdits.map(m => m.source_field));
       const newMappings = [...mappingEdits];
-      for (const key of payloadKeys) {
+      for (const key of Object.keys(clickedFlat)) {
         if (!existingSourceFields.has(key)) {
           newMappings.push({
             source_field: key,
-            target: autoDetectTarget(key, app.questions.map(q => q.title)),
+            target: autoDetectTarget(key, questionTitles),
           });
         }
       }
 
-      // Actually ingest the data using the mapping
-      const mappedData = applyFieldMapping(flatPayload, newMappings, config?.calculated_fields);
-      if (submittedAt && !mappedData.submitted_at) {
-        mappedData.submitted_at = submittedAt;
+      // Step 2: Process the clicked item
+      const mappedData = applyFieldMapping(clickedFlat, newMappings, config?.calculated_fields);
+      if (clickedSubmittedAt && !mappedData.submitted_at) {
+        mappedData.submitted_at = clickedSubmittedAt;
       }
       let updated = mergeWebhookData(app, mappedData);
 
-      // Remove this pending item
-      const updatedPending = (updated.pending_webhook_submissions ?? []).filter(
-        p => p.id !== pendingItem.id
-      );
+      // Step 3: Build set of all mapped source fields
+      const mappedSourceFields = new Set(newMappings.map(m => m.source_field));
 
-      // Update config with cumulative signature (union of known + pending fields)
+      // Step 4: Auto-process all other pending items whose fields are covered by the mapping
+      const processedIds = new Set([pendingItem.id]);
+      const remainingPending: PendingWebhookSubmission[] = [];
+      const allPending = updated.pending_webhook_submissions ?? [];
+
+      for (const p of allPending) {
+        if (p.id === pendingItem.id || p.status !== "pending") continue;
+        const { flat, submittedAt } = flattenPendingItem(p);
+        const fields = Object.keys(flat);
+        const allFieldsMapped = fields.every(f => mappedSourceFields.has(f));
+
+        if (allFieldsMapped) {
+          // Process this pending item too
+          const mapped = applyFieldMapping(flat, newMappings, config?.calculated_fields);
+          if (submittedAt && !mapped.submitted_at) {
+            mapped.submitted_at = submittedAt;
+          }
+          updated = mergeWebhookData(updated, mapped);
+          processedIds.add(p.id);
+        } else {
+          remainingPending.push(p);
+        }
+      }
+
+      // Step 5: Update signature cumulatively
       const knownFields = new Set(
         config?.last_field_signature ? config.last_field_signature.split("|") : []
       );
-      for (const k of payloadKeys) knownFields.add(k);
+      Array.from(mappedSourceFields).forEach(f => knownFields.add(f));
       const cumulativeSignature = computeFieldSignature(Array.from(knownFields));
+
       updated = {
         ...updated,
         webhook_config: config
           ? { ...config, field_mapping: newMappings, last_field_signature: cumulativeSignature }
           : undefined,
-        pending_webhook_submissions: updatedPending,
+        pending_webhook_submissions: remainingPending,
       };
       setMappingEdits(newMappings);
       onSave(updated);
