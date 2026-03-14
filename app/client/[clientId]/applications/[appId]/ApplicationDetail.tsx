@@ -4332,20 +4332,21 @@ function CorrelationTab({ app, onSave, clientName, clientId }: { app: Applicatio
   }, [questionCorrelations, overallShowRate, overallCloseRate, correlationRateType]);
 
   // Financial bucketing
-  interface FinBucket { label: string; count: number; bookedCount: number; showedCount: number; closedCount: number; emails: string[] }
+  interface FinBucket { label: string; count: number; bookedCount: number; showedCount: number; closedCount: number; emails: string[]; bookedEmails: string[]; showedEmails: string[]; closedEmails: string[] }
 
   function bucketize(items: { email: string; value: number | undefined }[], defs: { label: string; match: (v: number) => boolean }[]): FinBucket[] {
-    const buckets: FinBucket[] = defs.map((d) => ({ label: d.label, count: 0, bookedCount: 0, showedCount: 0, closedCount: 0, emails: [] }));
+    const buckets: FinBucket[] = defs.map((d) => ({ label: d.label, count: 0, bookedCount: 0, showedCount: 0, closedCount: 0, emails: [], bookedEmails: [], showedEmails: [], closedEmails: [] }));
     for (const item of items) {
       if (item.value == null) continue;
-      const booking = bookingByEmail.get(item.email.toLowerCase());
+      const email = item.email.toLowerCase();
+      const booking = bookingByEmail.get(email);
       for (let i = 0; i < defs.length; i++) {
         if (defs[i].match(item.value)) {
           buckets[i].count++;
-          buckets[i].emails.push(item.email.toLowerCase());
-          if (booking) buckets[i].bookedCount++;
-          if (booking?.showed) buckets[i].showedCount++;
-          if (booking?.closed) buckets[i].closedCount++;
+          buckets[i].emails.push(email);
+          if (booking) { buckets[i].bookedCount++; buckets[i].bookedEmails.push(email); }
+          if (booking?.showed) { buckets[i].showedCount++; buckets[i].showedEmails.push(email); }
+          if (booking?.closed) { buckets[i].closedCount++; buckets[i].closedEmails.push(email); }
           break;
         }
       }
@@ -5522,7 +5523,7 @@ function CorrelationCard({ item, variant, overallRate, rateType }: {
   );
 }
 
-function BucketTable({ buckets, totalCount, totalBookedCount = 0, hasBookingData, showRawCounts = false, onToggleDisplay, onBucketClick }: { buckets: { label: string; count: number; bookedCount: number; showedCount: number; closedCount: number; emails: string[] }[]; totalCount: number; totalBookedCount?: number; hasBookingData: boolean; showRawCounts?: boolean; onToggleDisplay?: () => void; onBucketClick?: (label: string, emails: string[]) => void }) {
+function BucketTable({ buckets, totalCount, totalBookedCount = 0, hasBookingData, showRawCounts = false, onToggleDisplay, onBucketClick }: { buckets: { label: string; count: number; bookedCount: number; showedCount: number; closedCount: number; emails: string[]; bookedEmails?: string[]; showedEmails?: string[]; closedEmails?: string[] }[]; totalCount: number; totalBookedCount?: number; hasBookingData: boolean; showRawCounts?: boolean; onToggleDisplay?: () => void; onBucketClick?: (label: string, emails: string[]) => void }) {
   const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const gridCols = hasBookingData ? "5rem minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)" : "5rem minmax(0,1fr)";
   return (
@@ -5540,37 +5541,56 @@ function BucketTable({ buckets, totalCount, totalBookedCount = 0, hasBookingData
         const appsPct = totalCount > 0 ? Math.round(b.count / totalCount * 100) : 0;
         const bookedPct = totalBookedCount > 0 ? Math.round(b.bookedCount / totalBookedCount * 100) : 0;
         return (
-          <div key={b.label} className={`grid items-center gap-2 rounded px-1 -mx-1 py-0.5 ${onBucketClick ? "cursor-pointer hover:bg-white/[0.04] transition-colors" : ""}`}
+          <div key={b.label} className="grid items-center gap-2 rounded px-1 -mx-1 py-0.5"
             style={{ gridTemplateColumns: gridCols }}
-            onClick={() => onBucketClick?.(b.label, b.emails)}
           >
-            <span className="text-[11px] font-medium text-slate-300">{b.label}</span>
+            <span
+              className={`text-[11px] font-medium text-slate-300 ${onBucketClick ? "cursor-pointer hover:text-indigo-400 hover:underline" : ""}`}
+              title={onBucketClick ? `Click to view all ${b.count} submissions for ${b.label}` : undefined}
+              onClick={() => onBucketClick?.(b.label, b.emails)}
+            >{b.label}</span>
             {/* Apps bar — % of total */}
-            <div className="flex items-center gap-1.5">
-              <div className="flex-1 h-3 bg-white/[0.06] rounded-full overflow-hidden" title={`${b.count} apps (${appsPct}% of total)`}>
+            <div
+              className={`flex items-center gap-1.5 ${onBucketClick ? "cursor-pointer" : ""}`}
+              title={`${b.count} apps (${appsPct}% of total)${onBucketClick ? " — click to view" : ""}`}
+              onClick={() => onBucketClick?.(`${b.label} — All Apps`, b.emails)}
+            >
+              <div className="flex-1 h-3 bg-white/[0.06] rounded-full overflow-hidden">
                 <div className="h-full bg-white/[0.12] rounded-full" style={{ width: `${Math.round(b.count / maxCount * 100)}%` }} />
               </div>
               <span className="text-[10px] text-slate-300 shrink-0 w-8 text-right font-semibold tabular-nums cursor-pointer select-none hover:underline" onClick={(e) => { e.stopPropagation(); onToggleDisplay?.(); }}>{showRawCounts ? b.count : `${appsPct}%`}</span>
             </div>
             {hasBookingData && (
-              <div className="flex items-center gap-1.5">
-                <div className="flex-1 h-3 bg-white/[0.06] rounded-full overflow-hidden" title={`${b.bookedCount} booked (${bookedPct}% of all bookings)`}>
+              <div
+                className={`flex items-center gap-1.5 ${onBucketClick ? "cursor-pointer" : ""}`}
+                title={`${b.bookedCount} booked (${bookedPct}% of all bookings)${onBucketClick ? " — click to view" : ""}`}
+                onClick={() => onBucketClick?.(`${b.label} — Booked`, b.bookedEmails || [])}
+              >
+                <div className="flex-1 h-3 bg-white/[0.06] rounded-full overflow-hidden">
                   <div className="h-full bg-indigo-300 rounded-full" style={{ width: `${Math.max(bookedPct > 0 ? 4 : 0, bookedPct)}%` }} />
                 </div>
                 <span className="text-[10px] text-indigo-400 shrink-0 w-8 text-right font-semibold tabular-nums cursor-pointer select-none hover:underline" onClick={(e) => { e.stopPropagation(); onToggleDisplay?.(); }}>{showRawCounts ? b.bookedCount : `${bookedPct}%`}</span>
               </div>
             )}
             {hasBookingData && (
-              <div className="flex items-center gap-1.5">
-                <div className="flex-1 h-3 bg-white/[0.06] rounded-full overflow-hidden" title={`${b.showedCount} showed of ${b.bookedCount} booked`}>
+              <div
+                className={`flex items-center gap-1.5 ${onBucketClick ? "cursor-pointer" : ""}`}
+                title={`${b.showedCount} showed of ${b.bookedCount} booked${onBucketClick ? " — click to view" : ""}`}
+                onClick={() => onBucketClick?.(`${b.label} — Showed`, b.showedEmails || [])}
+              >
+                <div className="flex-1 h-3 bg-white/[0.06] rounded-full overflow-hidden">
                   <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${b.bookedCount ? Math.round(b.showedCount / b.bookedCount * 100) : 0}%` }} />
                 </div>
                 <span className="text-[10px] text-emerald-400 shrink-0 w-8 text-right font-medium tabular-nums cursor-pointer select-none hover:underline" onClick={(e) => { e.stopPropagation(); onToggleDisplay?.(); }}>{showRawCounts ? b.showedCount : pct(b.showedCount, b.bookedCount)}</span>
               </div>
             )}
             {hasBookingData && (
-              <div className="flex items-center gap-1.5">
-                <div className="flex-1 h-3 bg-white/[0.06] rounded-full overflow-hidden" title={`${b.closedCount} closed of ${b.showedCount} showed`}>
+              <div
+                className={`flex items-center gap-1.5 ${onBucketClick ? "cursor-pointer" : ""}`}
+                title={`${b.closedCount} closed of ${b.showedCount} showed${onBucketClick ? " — click to view" : ""}`}
+                onClick={() => onBucketClick?.(`${b.label} — Closed`, b.closedEmails || [])}
+              >
+                <div className="flex-1 h-3 bg-white/[0.06] rounded-full overflow-hidden">
                   <div className="h-full bg-green-500 rounded-full" style={{ width: `${b.showedCount ? Math.round(b.closedCount / b.showedCount * 100) : 0}%` }} />
                 </div>
                 <span className="text-[10px] text-green-600 shrink-0 w-8 text-right font-medium tabular-nums cursor-pointer select-none hover:underline" onClick={(e) => { e.stopPropagation(); onToggleDisplay?.(); }}>{showRawCounts ? b.closedCount : pct(b.closedCount, b.showedCount)}</span>
