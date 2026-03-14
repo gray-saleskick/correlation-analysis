@@ -516,11 +516,29 @@ export function mergeWebhookData(
     if (data.name) existing.respondent_name = data.name;
     if (data.phone) existing.respondent_phone = data.phone;
 
+    // Merge grade fields individually — never overwrite with undefined
     if (Object.values(data.grade).some((v) => v !== undefined)) {
-      existing.grade = { ...existing.grade, ...data.grade };
+      const g = data.grade;
+      existing.grade = {
+        ...existing.grade,
+        ...(g.final_grade !== undefined && { final_grade: g.final_grade }),
+        ...(g.answer_grade !== undefined && { answer_grade: g.answer_grade }),
+        ...(g.financial_grade !== undefined && { financial_grade: g.financial_grade }),
+        ...(g.was_disqualified !== undefined && { was_disqualified: g.was_disqualified }),
+        ...(g.was_spam !== undefined && { was_spam: g.was_spam }),
+        ...(g.details !== undefined && { details: g.details }),
+      };
     }
+    // Merge financial fields individually — never overwrite with undefined
     if (Object.values(data.financial).some((v) => v !== undefined)) {
-      existing.financial = { ...existing.financial, ...data.financial };
+      const f = data.financial;
+      existing.financial = {
+        ...existing.financial,
+        ...(f.credit_score !== undefined && { credit_score: f.credit_score }),
+        ...(f.estimated_income !== undefined && { estimated_income: f.estimated_income }),
+        ...(f.available_credit !== undefined && { available_credit: f.available_credit }),
+        ...(f.available_funding !== undefined && { available_funding: f.available_funding }),
+      };
     }
 
     submissions[existingSubIdx] = existing;
