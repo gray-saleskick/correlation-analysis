@@ -28,6 +28,13 @@ import {
   autoDetectTarget,
 } from "@/lib/csvUtils";
 import { hasWebhookAccess } from "@/lib/featureFlags";
+import {
+  flattenPayload,
+  parseTypeformPayload,
+  applyFieldMapping,
+  mergeWebhookData,
+  computeFieldSignature,
+} from "@/lib/webhookUtils";
 import type {
   WebhookConfig,
   WebhookFieldMapping,
@@ -3885,6 +3892,8 @@ const WEBHOOK_MAPPING_TARGETS = [
   { value: "first_name", label: "First Name" },
   { value: "last_name", label: "Last Name" },
   { value: "full_name", label: "Full Name" },
+  { value: "phone", label: "Phone" },
+  { value: "submission_id", label: "Submission ID" },
   { value: "submitted_at", label: "Submitted At" },
   { value: "booking_date", label: "Booking Date" },
   { value: "close_date", label: "Close Date" },
@@ -4001,11 +4010,25 @@ function WebhooksTab({
   async function acceptPending(pendingItem: PendingWebhookSubmission) {
     setProcessingPendingId(pendingItem.id);
     try {
-      // Extract fields from raw payload and add to mapping if needed
-      const payloadKeys = Object.keys(
-        typeof pendingItem.raw_payload === "object" ? pendingItem.raw_payload : {}
-      );
+      // Flatten payload properly based on source type
+      let flatPayload: Record<string, string>;
+      let submittedAt: string | undefined;
 
+      if (config?.source === "typeform") {
+        const parsed = parseTypeformPayload(pendingItem.raw_payload);
+        if (parsed) {
+          flatPayload = parsed.fields;
+          submittedAt = parsed.meta.submitted_at;
+        } else {
+          flatPayload = flattenPayload(pendingItem.raw_payload);
+        }
+      } else {
+        flatPayload = flattenPayload(pendingItem.raw_payload);
+      }
+
+      const payloadKeys = Object.keys(flatPayload);
+
+      // Add new fields to mapping (preserve existing)
       const existingSourceFields = new Set(mappingEdits.map(m => m.source_field));
       const newMappings = [...mappingEdits];
       for (const key of payloadKeys) {
@@ -4017,15 +4040,24 @@ function WebhooksTab({
         }
       }
 
+      // Actually ingest the data using the mapping
+      const mappedData = applyFieldMapping(flatPayload, newMappings, config?.calculated_fields);
+      if (submittedAt && !mappedData.submitted_at) {
+        mappedData.submitted_at = submittedAt;
+      }
+      let updated = mergeWebhookData(app, mappedData);
+
       // Remove this pending item
-      const updatedPending = (app.pending_webhook_submissions ?? []).filter(
+      const updatedPending = (updated.pending_webhook_submissions ?? []).filter(
         p => p.id !== pendingItem.id
       );
 
-      const updated = {
-        ...app,
+      // Update config with new mapping and signature
+      const newSignature = computeFieldSignature(payloadKeys);
+      updated = {
+        ...updated,
         webhook_config: config
-          ? { ...config, field_mapping: newMappings }
+          ? { ...config, field_mapping: newMappings, last_field_signature: newSignature }
           : undefined,
         pending_webhook_submissions: updatedPending,
       };

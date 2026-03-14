@@ -85,10 +85,13 @@ export async function POST(
       }
       app.pending_webhook_submissions.push(pending);
 
-      // Update signature on first reception
-      if (isFirstReception) {
-        config.last_field_signature = incomingSignature;
+      // Cap pending submissions at 50 (keep most recent)
+      if (app.pending_webhook_submissions.length > 50) {
+        app.pending_webhook_submissions = app.pending_webhook_submissions.slice(-50);
       }
+
+      // Always update signature so subsequent identical payloads aren't re-flagged
+      config.last_field_signature = incomingSignature;
 
       profile.applications[appIndex] = app;
       await writeProfile(profile.clientId, profile);

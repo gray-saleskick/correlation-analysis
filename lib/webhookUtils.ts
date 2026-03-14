@@ -253,6 +253,11 @@ export function applyFieldMapping(
     call_result: {},
   };
 
+  // Collect name parts separately to handle any ordering
+  let firstName = "";
+  let lastName = "";
+  let fullName = "";
+
   for (const { source_field, target } of mapping) {
     const value = payload[source_field];
     if (value === undefined || value === "") continue;
@@ -262,15 +267,12 @@ export function applyFieldMapping(
     // Special fields
     if (target === "email") {
       result.email = value.trim().toLowerCase();
-    } else if (target === "first_name" || target === "last_name" || target === "full_name") {
-      // Accumulate name parts
-      if (target === "full_name") {
-        result.name = value.trim();
-      } else {
-        result.name = result.name
-          ? `${result.name} ${value.trim()}`
-          : value.trim();
-      }
+    } else if (target === "first_name") {
+      firstName = value.trim();
+    } else if (target === "last_name") {
+      lastName = value.trim();
+    } else if (target === "full_name") {
+      fullName = value.trim();
     } else if (target === "submitted_at") {
       result.submitted_at = value;
     } else if (target === "booking_date") {
@@ -320,6 +322,9 @@ export function applyFieldMapping(
       result.answers.push({ question_title: questionTitle, value });
     }
   }
+
+  // Compose name from parts (full_name takes priority, then first + last)
+  result.name = fullName || [firstName, lastName].filter(Boolean).join(" ") || undefined;
 
   // Apply cascade: closed → showed → booked
   if (result.call_result.closed) {
