@@ -151,6 +151,8 @@ export interface Application {
   grading_audit_client_notes?: string;
   grading_audit_chat?: ChatMessage[];
   data_chats?: DataChat[];
+  share_token?: string;
+  share_enabled?: boolean;
 }
 
 // Correlation filter types

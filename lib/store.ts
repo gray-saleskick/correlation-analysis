@@ -16,6 +16,7 @@ export async function listClients(): Promise<
   const { data, error } = await supabase
     .from("clients")
     .select("client_id, profile")
+    .neq("client_id", "__users__")
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -148,7 +149,7 @@ export async function getAggregateStats(): Promise<AggregateStats> {
     totalCloses: 0,
   };
 
-  const { data, error } = await supabase.from("clients").select("profile");
+  const { data, error } = await supabase.from("clients").select("client_id, profile").neq("client_id", "__users__");
 
   if (error || !data) return stats;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { AggregateStats } from "@/lib/store";
 
@@ -9,6 +9,13 @@ interface ClientSummary {
   clientName: string;
   created_at: string;
   appCount: number;
+}
+
+interface UserInfo {
+  id: string;
+  email: string;
+  name: string | null;
+  created_at: string;
 }
 
 function formatNumber(n: number): string {
@@ -24,6 +31,7 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
 
   // Settings modal state
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"general" | "accounts">("general");
   const [settingsSearch, setSettingsSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ClientSummary | null>(null);
   const [confirmText, setConfirmText] = useState("");
@@ -35,6 +43,81 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
     return "";
   });
   const [apiKeySaved, setApiKeySaved] = useState(false);
+
+  // Account management state
+  const [users, setUsers] = useState<UserInfo[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newUserName, setNewUserName] = useState("");
+  const [registerError, setRegisterError] = useState("");
+  const [registerSuccess, setRegisterSuccess] = useState("");
+  const [registering, setRegistering] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState("");
+  const [changingPw, setChangingPw] = useState(false);
+
+  async function loadUsers() {
+    setLoadingUsers(true);
+    try {
+      const res = await fetch("/api/auth/users");
+      const data = await res.json();
+      if (data.users) setUsers(data.users);
+    } catch { /* ignore */ }
+    finally { setLoadingUsers(false); }
+  }
+
+  async function handleRegister() {
+    if (!newEmail.trim() || !newPassword.trim()) return;
+    setRegistering(true);
+    setRegisterError("");
+    setRegisterSuccess("");
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: newEmail, password: newPassword, name: newUserName || undefined }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRegisterSuccess(`Account created for ${newEmail}`);
+        setNewEmail(""); setNewPassword(""); setNewUserName("");
+        loadUsers();
+      } else {
+        setRegisterError(data.error || "Failed to create account");
+      }
+    } catch { setRegisterError("Network error"); }
+    finally { setRegistering(false); }
+  }
+
+  async function handleChangePassword() {
+    if (!currentPassword || !newPw) return;
+    if (newPw !== confirmPw) { setPwError("New passwords don't match"); return; }
+    setChangingPw(true);
+    setPwError(""); setPwSuccess("");
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword: newPw }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPwSuccess("Password changed successfully");
+        setCurrentPassword(""); setNewPw(""); setConfirmPw("");
+      } else {
+        setPwError(data.error || "Failed to change password");
+      }
+    } catch { setPwError("Network error"); }
+    finally { setChangingPw(false); }
+  }
+
+  useEffect(() => {
+    if (settingsOpen && settingsTab === "accounts") loadUsers();
+  }, [settingsOpen, settingsTab]);
 
   const filtered = search.trim()
     ? clients.filter((c) => c.clientName.toLowerCase().includes(search.trim().toLowerCase()))
@@ -91,6 +174,7 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
     setSettingsSearch("");
     setDeleteTarget(null);
     setConfirmText("");
+    setSettingsTab("general");
     setSettingsOpen(true);
   }
 
@@ -262,111 +346,185 @@ export default function HomeClient({ initialClients, stats }: { initialClients: 
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSettingsOpen(false)} />
-          <div className="relative bg-slate-900 border border-white/[0.1] rounded-2xl w-full max-w-md mx-4 shadow-2xl max-h-[85vh] flex flex-col">
-            {/* Header */}
-            <div className="px-6 pt-5 pb-4 border-b border-white/[0.08] flex items-center justify-between shrink-0">
-              <h2 className="text-sm font-bold text-slate-200">Settings</h2>
-              <button onClick={() => setSettingsOpen(false)} className="text-slate-300 hover:text-slate-200 transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+          <div className="relative bg-slate-900 border border-white/[0.1] rounded-2xl w-full max-w-lg mx-4 shadow-2xl max-h-[85vh] flex flex-col">
+            {/* Header + Tabs */}
+            <div className="px-6 pt-5 pb-0 border-b border-white/[0.08] shrink-0">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-bold text-slate-200">Settings</h2>
+                <button onClick={() => setSettingsOpen(false)} className="text-slate-300 hover:text-slate-200 transition-colors">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setSettingsTab("general")}
+                  className={`pb-2.5 text-[11px] font-semibold border-b-2 transition-colors ${settingsTab === "general" ? "border-indigo-400 text-indigo-400" : "border-transparent text-slate-400 hover:text-slate-300"}`}
+                >General</button>
+                <button
+                  onClick={() => setSettingsTab("accounts")}
+                  className={`pb-2.5 text-[11px] font-semibold border-b-2 transition-colors ${settingsTab === "accounts" ? "border-indigo-400 text-indigo-400" : "border-transparent text-slate-400 hover:text-slate-300"}`}
+                >Accounts</button>
+              </div>
             </div>
 
             <div className="px-6 py-4 space-y-6 overflow-y-auto flex-1">
-              {/* API Key Section */}
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 mb-2">Anthropic API Key</p>
-                <p className="text-[11px] text-slate-300 mb-2">Used for AI grading prompts. Stored locally in your browser.</p>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-ant-…"
-                    className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent font-mono"
-                  />
-                  <button
-                    onClick={saveApiKey}
-                    disabled={!apiKey.trim()}
-                    className="px-3 py-2 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors shrink-0"
-                  >
-                    {apiKeySaved ? "Saved ✓" : "Save"}
-                  </button>
-                </div>
-              </div>
 
-              {/* Delete Client Section */}
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-2">Delete a Client</p>
-                <p className="text-[11px] text-slate-300 mb-2">Search for a client to permanently delete them and all their data.</p>
-
-                {!deleteTarget ? (
-                  <>
-                    <input
-                      value={settingsSearch}
-                      onChange={(e) => setSettingsSearch(e.target.value)}
-                      placeholder="Search by client name…"
-                      className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-400/50 focus:border-transparent mb-2"
-                    />
-                    {settingsSearch.trim() && settingsFiltered.length === 0 && (
-                      <p className="text-[11px] text-slate-400 italic">No matching clients.</p>
-                    )}
-                    {settingsFiltered.length > 0 && (
-                      <div className="space-y-1 max-h-40 overflow-y-auto">
-                        {settingsFiltered.map((c) => (
-                          <button
-                            key={c.clientId}
-                            onClick={() => { setDeleteTarget(c); setConfirmText(""); }}
-                            className="w-full text-left px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-red-500/10 hover:border-red-500/20 transition-all text-xs text-slate-300 hover:text-red-400"
-                          >
-                            {c.clientName}
-                            <span className="text-slate-400 ml-2">({c.appCount} app{c.appCount !== 1 ? "s" : ""})</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <svg className="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                      <p className="text-xs font-semibold text-red-400">
-                        Permanently delete &ldquo;{deleteTarget.clientName}&rdquo;?
-                      </p>
-                    </div>
-                    <p className="text-[11px] text-slate-300">
-                      This will delete {deleteTarget.appCount} application{deleteTarget.appCount !== 1 ? "s" : ""} and all associated data. This cannot be undone.
-                    </p>
-                    <p className="text-[11px] text-slate-300">
-                      Type <span className="font-mono font-semibold text-red-400">{deleteTarget.clientName}</span> to confirm:
-                    </p>
-                    <input
-                      value={confirmText}
-                      onChange={(e) => setConfirmText(e.target.value)}
-                      placeholder={deleteTarget.clientName}
-                      className="w-full bg-white/[0.05] border border-red-500/20 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-400/50 focus:border-transparent"
-                    />
+              {settingsTab === "general" && (
+                <>
+                  {/* API Key Section */}
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 mb-2">Anthropic API Key</p>
+                    <p className="text-[11px] text-slate-300 mb-2">Used for AI grading prompts. Stored locally in your browser.</p>
                     <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder="sk-ant-…"
+                        className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent font-mono"
+                      />
                       <button
-                        onClick={() => { setDeleteTarget(null); setConfirmText(""); }}
-                        className="flex-1 px-3 py-2 text-xs font-semibold border border-white/[0.08] rounded-lg text-slate-300 hover:bg-white/[0.04] transition-colors"
+                        onClick={saveApiKey}
+                        disabled={!apiKey.trim()}
+                        className="px-3 py-2 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors shrink-0"
                       >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => deleteClient(deleteTarget.clientId)}
-                        disabled={confirmText !== deleteTarget.clientName || deleting}
-                        className="flex-1 px-3 py-2 text-xs font-semibold bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                      >
-                        {deleting ? "Deleting…" : "Delete Forever"}
+                        {apiKeySaved ? "Saved ✓" : "Save"}
                       </button>
                     </div>
                   </div>
-                )}
-              </div>
+
+                  {/* Delete Client Section */}
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-2">Delete a Client</p>
+                    <p className="text-[11px] text-slate-300 mb-2">Search for a client to permanently delete them and all their data.</p>
+
+                    {!deleteTarget ? (
+                      <>
+                        <input
+                          value={settingsSearch}
+                          onChange={(e) => setSettingsSearch(e.target.value)}
+                          placeholder="Search by client name…"
+                          className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-400/50 focus:border-transparent mb-2"
+                        />
+                        {settingsSearch.trim() && settingsFiltered.length === 0 && (
+                          <p className="text-[11px] text-slate-400 italic">No matching clients.</p>
+                        )}
+                        {settingsFiltered.length > 0 && (
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {settingsFiltered.map((c) => (
+                              <button
+                                key={c.clientId}
+                                onClick={() => { setDeleteTarget(c); setConfirmText(""); }}
+                                className="w-full text-left px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-red-500/10 hover:border-red-500/20 transition-all text-xs text-slate-300 hover:text-red-400"
+                              >
+                                {c.clientName}
+                                <span className="text-slate-400 ml-2">({c.appCount} app{c.appCount !== 1 ? "s" : ""})</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <svg className="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          <p className="text-xs font-semibold text-red-400">
+                            Permanently delete &ldquo;{deleteTarget.clientName}&rdquo;?
+                          </p>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          This will delete {deleteTarget.appCount} application{deleteTarget.appCount !== 1 ? "s" : ""} and all associated data. This cannot be undone.
+                        </p>
+                        <p className="text-[11px] text-slate-300">
+                          Type <span className="font-mono font-semibold text-red-400">{deleteTarget.clientName}</span> to confirm:
+                        </p>
+                        <input
+                          value={confirmText}
+                          onChange={(e) => setConfirmText(e.target.value)}
+                          placeholder={deleteTarget.clientName}
+                          className="w-full bg-white/[0.05] border border-red-500/20 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-400/50 focus:border-transparent"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => { setDeleteTarget(null); setConfirmText(""); }}
+                            className="flex-1 px-3 py-2 text-xs font-semibold border border-white/[0.08] rounded-lg text-slate-300 hover:bg-white/[0.04] transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => deleteClient(deleteTarget.clientId)}
+                            disabled={confirmText !== deleteTarget.clientName || deleting}
+                            className="flex-1 px-3 py-2 text-xs font-semibold bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {deleting ? "Deleting…" : "Delete Forever"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {settingsTab === "accounts" && (
+                <>
+                  {/* Change Password */}
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 mb-2">Change Your Password</p>
+                    <div className="space-y-2">
+                      <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Current password" className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" />
+                      <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="New password" className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" />
+                      <input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} placeholder="Confirm new password" className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" />
+                      {pwError && <p className="text-xs text-red-400">{pwError}</p>}
+                      {pwSuccess && <p className="text-xs text-emerald-400">{pwSuccess}</p>}
+                      <button onClick={handleChangePassword} disabled={changingPw || !currentPassword || !newPw || !confirmPw} className="px-3 py-2 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors">
+                        {changingPw ? "Changing…" : "Change Password"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Create Account */}
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 mb-2">Create New Account</p>
+                    <p className="text-[11px] text-slate-300 mb-2">Create a login for another team member.</p>
+                    <div className="space-y-2">
+                      <input type="text" value={newUserName} onChange={(e) => setNewUserName(e.target.value)} placeholder="Name (optional)" className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" />
+                      <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Email address" className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" />
+                      <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Password (min 6 chars)" className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" />
+                      {registerError && <p className="text-xs text-red-400">{registerError}</p>}
+                      {registerSuccess && <p className="text-xs text-emerald-400">{registerSuccess}</p>}
+                      <button onClick={handleRegister} disabled={registering || !newEmail.trim() || !newPassword.trim()} className="px-3 py-2 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors">
+                        {registering ? "Creating…" : "Create Account"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* All Accounts */}
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 mb-2">Team Members</p>
+                    {loadingUsers ? (
+                      <p className="text-[11px] text-slate-400">Loading…</p>
+                    ) : users.length === 0 ? (
+                      <p className="text-[11px] text-slate-400">No accounts found.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {users.map((u) => (
+                          <div key={u.id} className="flex items-center justify-between px-3 py-2 bg-white/[0.04] border border-white/[0.06] rounded-lg">
+                            <div>
+                              <p className="text-xs font-medium text-slate-300">{u.name || u.email}</p>
+                              {u.name && <p className="text-[10px] text-slate-500">{u.email}</p>}
+                            </div>
+                            <p className="text-[10px] text-slate-500">{new Date(u.created_at).toLocaleDateString()}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

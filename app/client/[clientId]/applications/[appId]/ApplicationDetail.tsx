@@ -1002,7 +1002,7 @@ function QuestionsTab({
   // Audit state
   const [auditGenerating, setAuditGenerating] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
-  const [auditCollapsed, setAuditCollapsed] = useState(false);
+  const [auditCollapsed, setAuditCollapsed] = useState(true);
   const [showAuditNotes, setShowAuditNotes] = useState(false);
   const [auditNotes, setAuditNotes] = useState(app.audit_client_notes ?? "");
   const [showAuditRegenConfirm, setShowAuditRegenConfirm] = useState(false);
@@ -1042,7 +1042,7 @@ function QuestionsTab({
   // Grading Audit state
   const [gradingAuditGenerating, setGradingAuditGenerating] = useState(false);
   const [gradingAuditError, setGradingAuditError] = useState<string | null>(null);
-  const [gradingAuditCollapsed, setGradingAuditCollapsed] = useState(false);
+  const [gradingAuditCollapsed, setGradingAuditCollapsed] = useState(true);
   const [showGradingAuditNotes, setShowGradingAuditNotes] = useState(false);
   const [gradingAuditNotes, setGradingAuditNotes] = useState(app.grading_audit_client_notes ?? "");
   const [showGradingAuditRegenConfirm, setShowGradingAuditRegenConfirm] = useState(false);
@@ -3832,6 +3832,8 @@ function CorrelationTab({ app, onSave, clientName, clientId }: { app: Applicatio
   const [viewMode, setViewMode] = useState<"modern" | "classic">("modern");
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [sharePopoverOpen, setSharePopoverOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const correlationRef = useRef<HTMLDivElement>(null);
   const [expandedFinSections, setExpandedFinSections] = useState<Set<string>>(new Set());
   function toggleFinSection(key: string) {
@@ -3862,7 +3864,7 @@ function CorrelationTab({ app, onSave, clientName, clientId }: { app: Applicatio
   const [narrativeGenerating, setNarrativeGenerating] = useState(false);
   const [narrativeError, setNarrativeError] = useState<string | null>(null);
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
-  const [narrativeCollapsed, setNarrativeCollapsed] = useState(false);
+  const [narrativeCollapsed, setNarrativeCollapsed] = useState(true);
 
   // ── Data Chat state ─────────────────────────────────────────────────────
   const [dataChatOpen, setDataChatOpen] = useState(false);
@@ -4465,6 +4467,26 @@ Questions: ${(app.questions ?? []).length}`);
   const hasCreditAccess = filteredFinancialForAnalytics.some((r) => r.credit_access != null);
   const hasFunding = filteredFinancialForAnalytics.some((r) => r.access_to_funding != null);
 
+  // ── Share handlers ──────────────────────────────────────────────────────
+
+  function toggleShare() {
+    if (!app.share_token) {
+      // Generate token and enable
+      const token = crypto.randomUUID();
+      onSave({ ...app, share_token: token, share_enabled: true });
+    } else {
+      onSave({ ...app, share_enabled: !app.share_enabled });
+    }
+  }
+
+  function copyShareLink() {
+    if (!app.share_token) return;
+    const url = `${window.location.origin}/share/${app.share_token}`;
+    navigator.clipboard.writeText(url);
+    setShareCopied(true);
+    setTimeout(() => setShareCopied(false), 2000);
+  }
+
   // ── Export handlers ──────────────────────────────────────────────────────
 
   function exportFilename(ext: string): string {
@@ -4597,6 +4619,51 @@ Questions: ${(app.questions ?? []).length}`);
               </svg>
             </button>
           )}
+          {/* Share button */}
+          <div className="relative">
+            <button
+              onClick={() => setSharePopoverOpen(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1 text-[11px] font-semibold rounded-lg border transition-colors ${app.share_enabled ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-white/[0.08] text-slate-300 hover:bg-white/[0.04]"}`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              </svg>
+              Share
+            </button>
+            {sharePopoverOpen && (
+              <div className="absolute right-0 top-full mt-1 bg-slate-900 border border-white/[0.1] rounded-xl shadow-2xl z-50 p-4 w-72">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[11px] font-semibold text-slate-300">Client-Facing Link</p>
+                  <button
+                    onClick={toggleShare}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${app.share_enabled ? "bg-emerald-500" : "bg-white/[0.1]"}`}
+                  >
+                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow ${app.share_enabled ? "left-[18px]" : "left-0.5"}`} />
+                  </button>
+                </div>
+                {app.share_token && app.share_enabled ? (
+                  <>
+                    <div className="flex gap-1.5">
+                      <input
+                        readOnly
+                        value={`${typeof window !== "undefined" ? window.location.origin : ""}/share/${app.share_token}`}
+                        className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-2 py-1.5 text-[10px] text-slate-400 font-mono truncate"
+                      />
+                      <button
+                        onClick={copyShareLink}
+                        className="px-2 py-1.5 text-[10px] font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors shrink-0"
+                      >
+                        {shareCopied ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-slate-500 mt-2">Anyone with this link can view the correlation analysis (read-only). No login required.</p>
+                  </>
+                ) : (
+                  <p className="text-[10px] text-slate-500">Enable sharing to generate a public link for this analysis.</p>
+                )}
+              </div>
+            )}
+          </div>
           <div className="relative">
             <button
               onClick={() => setExportOpen(!exportOpen)}
