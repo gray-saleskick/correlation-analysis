@@ -3928,6 +3928,7 @@ function WebhooksTab({
   const [savingMapping, setSavingMapping] = useState(false);
   const [mappingEdits, setMappingEdits] = useState<WebhookFieldMapping[]>(config?.field_mapping ?? []);
   const [processingPendingId, setProcessingPendingId] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   const [showCalcForm, setShowCalcForm] = useState(false);
   const [newCalcName, setNewCalcName] = useState("");
   const [newCalcType, setNewCalcType] = useState<"date_diff_days" | "math">("date_diff_days");
@@ -4277,10 +4278,18 @@ function WebhooksTab({
           <div className="flex items-center gap-2">
             <code className="text-xs text-slate-300 flex-1 break-all select-all">{webhookUrl}</code>
             <button
-              onClick={() => navigator.clipboard.writeText(webhookUrl)}
-              className="px-2 py-1 text-[10px] font-semibold rounded bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] transition-colors flex-shrink-0"
+              onClick={() => {
+                navigator.clipboard.writeText(webhookUrl);
+                setCopiedUrl(true);
+                setTimeout(() => setCopiedUrl(false), 2000);
+              }}
+              className={`px-2 py-1 text-[10px] font-semibold rounded transition-colors flex-shrink-0 ${
+                copiedUrl
+                  ? "bg-emerald-600/30 text-emerald-300"
+                  : "bg-white/[0.08] text-slate-300 hover:bg-white/[0.12]"
+              }`}
             >
-              Copy
+              {copiedUrl ? "✓ Copied!" : "Copy"}
             </button>
           </div>
         </div>
