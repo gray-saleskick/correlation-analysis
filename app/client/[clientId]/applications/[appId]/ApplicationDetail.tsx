@@ -4009,10 +4009,52 @@ function WebhooksTab({
     if (!config) return;
     setSavingMapping(true);
     try {
-      const updated = {
-        ...app,
-        webhook_config: { ...config, field_mapping: mappingEdits },
+      const mappedSourceFields = new Set(mappingEdits.map(m => m.source_field));
+      let updated = { ...app };
+
+      // Helper: flatten a pending item's payload
+      const flattenPending = (item: PendingWebhookSubmission): {
+        flat: Record<string, string>;
+        submittedAt?: string;
+      } => {
+        if (config.source === "typeform") {
+          const parsed = parseTypeformPayload(item.raw_payload);
+          if (parsed) return { flat: parsed.fields, submittedAt: parsed.meta.submitted_at };
+        }
+        return { flat: flattenPayload(item.raw_payload) };
       };
+
+      // Process all pending submissions whose fields are covered by the mapping
+      const remaining: PendingWebhookSubmission[] = [];
+      const allPending = (app.pending_webhook_submissions ?? []).filter(p => p.status === "pending");
+      const knownSigFields = new Set(
+        config.last_field_signature ? config.last_field_signature.split("|") : []
+      );
+
+      for (const p of allPending) {
+        const { flat, submittedAt } = flattenPending(p);
+        const fields = Object.keys(flat);
+        const allFieldsMapped = fields.every(f => mappedSourceFields.has(f));
+
+        if (allFieldsMapped) {
+          const mapped = applyFieldMapping(flat, mappingEdits, config.calculated_fields);
+          if (submittedAt && !mapped.submitted_at) {
+            mapped.submitted_at = submittedAt;
+          }
+          updated = mergeWebhookData(updated, mapped);
+          for (const f of fields) knownSigFields.add(f);
+        } else {
+          remaining.push(p);
+        }
+      }
+
+      const cumulativeSignature = computeFieldSignature(Array.from(knownSigFields));
+      updated.webhook_config = {
+        ...config,
+        field_mapping: mappingEdits,
+        last_field_signature: cumulativeSignature,
+      };
+      updated.pending_webhook_submissions = remaining;
       onSave(updated);
     } finally {
       setSavingMapping(false);
