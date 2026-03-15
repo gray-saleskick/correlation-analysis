@@ -4280,23 +4280,37 @@ function WebhooksTab({
               <span />
               <span>Target</span>
             </div>
-            {mappingEdits.map((m) => (
-              <div key={m.source_field} className="grid grid-cols-[1fr,24px,1fr] gap-2 items-center px-3 py-2 bg-white/[0.02] rounded-lg">
-                <span className="text-xs text-slate-300 truncate" title={m.source_field}>{m.source_field}</span>
-                <span className="text-xs text-slate-500 text-center">→</span>
-                <select
-                  value={m.target}
-                  onChange={(e) => updateMappingTarget(m.source_field, e.target.value)}
-                  className="w-full bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
-                >
-                  {allTargets.map((t) => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                  <option disabled>──────────</option>
-                  <option value="__create_new__">+ Create New Question</option>
-                </select>
-              </div>
-            ))}
+            {mappingEdits.map((m) => {
+              // Build set of targets already used by OTHER rows
+              const usedTargets = new Set(
+                mappingEdits
+                  .filter(o => o.source_field !== m.source_field && o.target !== "skip" && o.target !== "")
+                  .map(o => o.target)
+              );
+              return (
+                <div key={m.source_field} className="grid grid-cols-[1fr,24px,1fr] gap-2 items-center px-3 py-2 bg-white/[0.02] rounded-lg">
+                  <span className="text-xs text-slate-300 truncate" title={m.source_field}>{m.source_field}</span>
+                  <span className="text-xs text-slate-500 text-center">→</span>
+                  <select
+                    value={m.target}
+                    onChange={(e) => updateMappingTarget(m.source_field, e.target.value)}
+                    className="w-full bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
+                  >
+                    {allTargets.map((t) => (
+                      <option
+                        key={t.value}
+                        value={t.value}
+                        disabled={usedTargets.has(t.value)}
+                      >
+                        {t.label}{usedTargets.has(t.value) ? " (assigned)" : ""}
+                      </option>
+                    ))}
+                    <option disabled>──────────</option>
+                    <option value="__create_new__">+ Create New Question</option>
+                  </select>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
