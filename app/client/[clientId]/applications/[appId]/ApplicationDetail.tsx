@@ -3979,7 +3979,7 @@ function WebhooksTab({
 
   function updateMappingTarget(sourceField: string, target: string) {
     if (target === "__create_new__") {
-      const title = window.prompt("Enter new question title:");
+      const title = window.prompt("Enter new question title:", sourceField);
       if (!title?.trim()) return;
       const trimmed = title.trim();
       // Create the question on the app if it doesn't exist
