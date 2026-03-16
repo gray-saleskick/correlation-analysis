@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 const SYSTEM_PROMPTS: Record<string, string> = {
   narrative: `You are a follow-up assistant for a lead analysis consultation. The original lead analysis is provided below. Answer the user's follow-up questions based on this analysis and the underlying data it references.
@@ -48,8 +49,9 @@ export async function POST(
     const apiKey = bodyApiKey || process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
+      console.error("Chat: No API key found. ANTHROPIC_API_KEY env var is not set.");
       return NextResponse.json(
-        { success: false, error: "API key is required. Set ANTHROPIC_API_KEY env var or add key in Settings." },
+        { success: false, error: "Server API key not configured. Contact admin." },
         { status: 400 }
       );
     }
@@ -83,7 +85,7 @@ export async function POST(
     };
     const systemPrompt = `${SYSTEM_PROMPTS[context]}\n\n--- ${contextLabels[context] ?? "ANALYSIS"} ---\n\n${systemContext}`;
 
-    const anthropic = new Anthropic({ apiKey });
+    const anthropic = new Anthropic({ apiKey, timeout: 25_000 });
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 4096,

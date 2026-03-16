@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readProfile } from "@/lib/store";
 import Anthropic from "@anthropic-ai/sdk";
+
+export const maxDuration = 60;
 import type {
   Application,
   AppSubmission,
@@ -433,8 +435,9 @@ export async function POST(
     const apiKey = bodyApiKey || process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
+      console.error("Generate grading audit: No API key found. ANTHROPIC_API_KEY env var is not set.");
       return NextResponse.json(
-        { success: false, error: "API key is required. Set ANTHROPIC_API_KEY env var or add key in Settings." },
+        { success: false, error: "Server API key not configured. Contact admin." },
         { status: 400 }
       );
     }
@@ -595,7 +598,7 @@ export async function POST(
     const userMessage = `Audit this application's grading and scoring system. Evaluate whether the current grading rubric is correctly calibrated against actual show and close outcomes, and recommend specific scoring changes:\n\n${payload.join("\n")}`;
 
     // ── Call Anthropic ────────────────────────────────────────────────
-    const anthropic = new Anthropic({ apiKey });
+    const anthropic = new Anthropic({ apiKey, timeout: 55_000 });
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 8192,

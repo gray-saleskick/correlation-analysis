@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readProfile } from "@/lib/store";
 import Anthropic from "@anthropic-ai/sdk";
+
+export const maxDuration = 30;
 import fs from "fs";
 import path from "path";
 
@@ -168,8 +170,9 @@ export async function POST(
     }
 
     if (!apiKey) {
+      console.error("Generate grading prompt: No API key found. ANTHROPIC_API_KEY env var is not set.");
       return NextResponse.json(
-        { success: false, error: "API key is required. Set ANTHROPIC_API_KEY env var or add key in Settings." },
+        { success: false, error: "Server API key not configured. Contact admin." },
         { status: 400 }
       );
     }
@@ -231,7 +234,7 @@ Please generate the customized grading prompt now.`;
     }
 
     // Call Anthropic API
-    const anthropic = new Anthropic({ apiKey });
+    const anthropic = new Anthropic({ apiKey, timeout: 25_000 });
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 2048,
