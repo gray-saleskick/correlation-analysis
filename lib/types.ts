@@ -157,6 +157,7 @@ export interface Application {
   share_enabled?: boolean;
   webhook_config?: WebhookConfig;
   pending_webhook_submissions?: PendingWebhookSubmission[];
+  load_history?: LoadHistoryEntry[];
 }
 
 // Webhook types
@@ -193,6 +194,42 @@ export interface PendingWebhookSubmission {
   source: string;
   status: "pending" | "rejected";
   reason?: string;
+}
+
+// Load history types
+
+export type LoadSourceType =
+  | "csv-submissions"
+  | "csv-financial"
+  | "csv-call-results"
+  | "typeform-sync"
+  | "webhook-batch"
+  | "webhook-auto";
+
+export interface LoadHistorySourceData {
+  csv_rows?: Record<string, string>[];
+  csv_mapping?: { file_column: string; target: string }[];
+  webhook_pending_ids?: string[];
+  webhook_field_mapping?: WebhookFieldMapping[];
+}
+
+export interface LoadHistoryDataSnapshot {
+  submissions?: AppSubmission[];
+  questions?: ApplicationQuestion[];
+  financial_records?: FinancialRecord[];
+  call_results?: CallResultRecord[];
+  bookings?: BookingRecord[];
+  pending_webhook_submissions?: PendingWebhookSubmission[];
+}
+
+export interface LoadHistoryEntry {
+  id: string;
+  timestamp: string;
+  source_type: LoadSourceType;
+  description: string;
+  record_count: number;
+  pre_load_snapshot: LoadHistoryDataSnapshot;
+  source_data?: LoadHistorySourceData;
 }
 
 // Correlation filter types

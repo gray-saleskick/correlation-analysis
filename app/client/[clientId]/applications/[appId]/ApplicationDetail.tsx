@@ -17,6 +17,9 @@ import type {
   SavedCorrelationFilter,
   ChatMessage,
   DataChat,
+  LoadSourceType,
+  LoadHistorySourceData,
+  LoadHistoryEntry,
 } from "@/lib/types";
 import Link from "next/link";
 import {
@@ -28,6 +31,7 @@ import {
   autoDetectTarget,
 } from "@/lib/csvUtils";
 import { hasWebhookAccess } from "@/lib/featureFlags";
+import { captureDataSnapshot, addLoadHistoryEntry, undoLoadHistoryEntry } from "@/lib/loadHistory";
 import {
   flattenPayload,
   parseTypeformPayload,
@@ -170,6 +174,34 @@ const FILTER_FIELD_LABELS: Record<FilterFieldType, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Load History Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function formatTimeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function getSourceBadge(sourceType: LoadSourceType): { label: string; color: string } {
+  switch (sourceType) {
+    case "csv-submissions": return { label: "CSV", color: "bg-emerald-500/20 text-emerald-400" };
+    case "csv-financial": return { label: "Financial", color: "bg-blue-500/20 text-blue-400" };
+    case "csv-call-results": return { label: "Calls", color: "bg-purple-500/20 text-purple-400" };
+    case "typeform-sync": return { label: "Typeform", color: "bg-cyan-500/20 text-cyan-400" };
+    case "webhook-batch": return { label: "Webhook", color: "bg-amber-500/20 text-amber-400" };
+    case "webhook-auto": return { label: "Auto", color: "bg-orange-500/20 text-orange-400" };
+    default: return { label: "Unknown", color: "bg-slate-500/20 text-slate-400" };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -191,6 +223,12 @@ export default function ApplicationDetail({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [undoStack, setUndoStack] = useState<Application[]>([]);
+  const [showLoadHistory, setShowLoadHistory] = useState(false);
+  const [remapState, setRemapState] = useState<{
+    sourceType: LoadSourceType;
+    sourceData: LoadHistorySourceData;
+    entryTimestamp: string;
+  } | null>(null);
   const appRef = useRef(app);
   useEffect(() => { appRef.current = app; }, [app]);
 
@@ -260,21 +298,39 @@ export default function ApplicationDetail({
 
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-lg font-bold text-slate-200">{app.title}</h1>
-        <button
-          onClick={handleUndo}
-          disabled={undoStack.length === 0 || saving}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-            undoStack.length > 0 && !saving
-              ? "border-indigo-500/30 text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20"
-              : "border-white/[0.08] text-slate-400 hover:bg-white/[0.04] hover:text-slate-300"
-          }`}
-          title={`Undo (${undoStack.length} steps available)`}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4" />
-          </svg>
-          Undo
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowLoadHistory(true)}
+            disabled={(app.load_history?.length ?? 0) === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors disabled:opacity-30 disabled:cursor-not-allowed border-white/[0.08] text-slate-400 hover:bg-white/[0.04] hover:text-slate-300"
+            title={`Load History (${app.load_history?.length ?? 0} entries)`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            History
+            {(app.load_history?.length ?? 0) > 0 && (
+              <span className="text-[10px] bg-white/[0.08] text-slate-300 rounded-full px-1.5 py-0.5">
+                {app.load_history!.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={handleUndo}
+            disabled={undoStack.length === 0 || saving}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+              undoStack.length > 0 && !saving
+                ? "border-indigo-500/30 text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20"
+                : "border-white/[0.08] text-slate-400 hover:bg-white/[0.04] hover:text-slate-300"
+            }`}
+            title={`Undo (${undoStack.length} steps available)`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4" />
+            </svg>
+            Undo
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -322,12 +378,138 @@ export default function ApplicationDetail({
         })()}
       </div>
 
+      {remapState && (
+        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span className="text-xs font-semibold text-amber-400">
+                Re-mapping load from {new Date(remapState.entryTimestamp).toLocaleString()}
+              </span>
+            </div>
+            <button
+              onClick={() => setRemapState(null)}
+              className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              Cancel Re-map
+            </button>
+          </div>
+          <p className="text-[11px] text-amber-400/70 mt-1">Adjust your column mappings below and re-import. The previous load has been undone.</p>
+        </div>
+      )}
+
       {activeTab === "questions" && <QuestionsTab app={app} onSave={saveApp} clientId={clientId} companyDescription={companyDescription} />}
-      {activeTab === "submissions" && <SubmissionsUploadTab app={app} onSave={saveApp} uploadType="submissions" />}
-      {activeTab === "financial" && <FinancialUploadTab app={app} onSave={saveApp} />}
-      {activeTab === "call_results" && <CallResultsUploadTab app={app} onSave={saveApp} />}
+      {activeTab === "submissions" && <SubmissionsUploadTab app={app} onSave={saveApp} uploadType="submissions" remapState={remapState?.sourceType === "csv-submissions" ? remapState : null} onRemapComplete={() => setRemapState(null)} />}
+      {activeTab === "financial" && <FinancialUploadTab app={app} onSave={saveApp} remapState={remapState?.sourceType === "csv-financial" ? remapState : null} onRemapComplete={() => setRemapState(null)} />}
+      {activeTab === "call_results" && <CallResultsUploadTab app={app} onSave={saveApp} remapState={remapState?.sourceType === "csv-call-results" ? remapState : null} onRemapComplete={() => setRemapState(null)} />}
       {activeTab === "webhooks" && <WebhooksTab app={app} onSave={saveApp} clientId={clientId} />}
       {activeTab === "correlation" && <CorrelationTab app={app} onSave={saveApp} clientName={clientName} clientId={clientId} />}
+
+      {/* Load History Slide-Over */}
+      {showLoadHistory && (
+        <div className="fixed inset-0 z-[55] flex justify-end">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowLoadHistory(false)} />
+          <div className="relative w-full max-w-md bg-slate-900 border-l border-white/[0.1] shadow-2xl overflow-y-auto">
+            <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm border-b border-white/[0.08] p-4 flex items-center justify-between z-10">
+              <h2 className="text-sm font-bold text-slate-200">Load History</h2>
+              <button onClick={() => setShowLoadHistory(false)} className="text-slate-400 hover:text-slate-200 transition-colors">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              {(app.load_history ?? []).length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-8">No load history yet.</p>
+              ) : (
+                [...(app.load_history ?? [])].reverse().map((entry, i) => {
+                  const isLatest = i === 0;
+                  const sourceBadge = getSourceBadge(entry.source_type);
+                  const hasSourceData = !!entry.source_data && (
+                    (entry.source_data.csv_rows && entry.source_data.csv_rows.length > 0) ||
+                    (entry.source_data.webhook_field_mapping && entry.source_data.webhook_field_mapping.length > 0)
+                  );
+                  const canRemap = hasSourceData && (
+                    entry.source_type === "csv-submissions" ||
+                    entry.source_type === "csv-financial" ||
+                    entry.source_type === "csv-call-results"
+                  );
+                  return (
+                    <div key={entry.id} className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3.5">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${sourceBadge.color}`}>
+                            {sourceBadge.label}
+                          </span>
+                          {isLatest && (
+                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400">
+                              Latest
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-500">{formatTimeAgo(entry.timestamp)}</span>
+                      </div>
+                      <p className="text-xs text-slate-300 mb-1">{entry.description}</p>
+                      <p className="text-[10px] text-slate-500 mb-3">{entry.record_count} record{entry.record_count !== 1 ? "s" : ""}</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            showConfirm(
+                              `Undo this load? This will revert to the state before "${entry.description}" and remove all subsequent loads (${i} load${i !== 1 ? "s" : ""} after this one).`,
+                              () => {
+                                const restored = undoLoadHistoryEntry(app, entry.id);
+                                saveApp(restored);
+                                setShowLoadHistory(false);
+                              }
+                            );
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-red-500/30 text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4" />
+                          </svg>
+                          Undo
+                        </button>
+                        {canRemap && (
+                          <button
+                            onClick={() => {
+                              showConfirm(
+                                `Re-map this load? This will undo the load and let you re-import with different column mappings.`,
+                                () => {
+                                  const restored = undoLoadHistoryEntry(app, entry.id);
+                                  saveApp(restored);
+                                  setRemapState({
+                                    sourceType: entry.source_type,
+                                    sourceData: entry.source_data!,
+                                    entryTimestamp: entry.timestamp,
+                                  });
+                                  // Switch to the appropriate tab
+                                  if (entry.source_type === "csv-submissions") setActiveTab("submissions");
+                                  else if (entry.source_type === "csv-financial") setActiveTab("financial");
+                                  else if (entry.source_type === "csv-call-results") setActiveTab("call_results");
+                                  setShowLoadHistory(false);
+                                }
+                              );
+                            }}
+                            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-amber-500/30 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Re-map
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Custom Confirmation Modal */}
       {confirmModal && (
@@ -890,7 +1072,20 @@ function QuestionsTab({
       });
     }
 
-    onSave({ ...app, questions: newQuestions, submissions: [...(app.submissions ?? []), ...newSubmissions] });
+    const preSnapshot = captureDataSnapshot(app);
+    let updated: Application = { ...app, questions: newQuestions, submissions: [...(app.submissions ?? []), ...newSubmissions] };
+    updated = addLoadHistoryEntry(
+      updated,
+      "csv-submissions",
+      `Imported ${newSubmissions.length} submissions from CSV`,
+      newSubmissions.length,
+      preSnapshot,
+      {
+        csv_rows: csvParsed.rows,
+        csv_mapping: csvMapping.map(m => ({ file_column: m.file_column, target: m.target })),
+      }
+    );
+    onSave(updated);
     setCsvParsed(null);
     setCsvMapping([]);
     setCsvImporting(false);
@@ -1791,7 +1986,13 @@ function convertTimezone(dateStr: string, fromTz: string, toTz: string): string 
   }
 }
 
-function SubmissionsUploadTab({ app, onSave, uploadType }: { app: Application; onSave: (a: Application) => void; uploadType: string }) {
+function SubmissionsUploadTab({ app, onSave, uploadType, remapState, onRemapComplete }: {
+  app: Application;
+  onSave: (a: Application) => void;
+  uploadType: string;
+  remapState?: { sourceType: LoadSourceType; sourceData: LoadHistorySourceData; entryTimestamp: string } | null;
+  onRemapComplete?: () => void;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<{ headers: string[]; rows: Record<string, string>[]; rowCount: number } | null>(null);
   const [mapping, setMapping] = useState<{ file_column: string; target: string }[]>([]);
@@ -1801,6 +2002,20 @@ function SubmissionsUploadTab({ app, onSave, uploadType }: { app: Application; o
   const [targetTz, setTargetTz] = useState("US/Eastern");
 
   const questionTitles = app.questions.map((q) => q.title);
+
+  // Pre-fill from re-map state
+  useEffect(() => {
+    if (remapState?.sourceData?.csv_rows && remapState.sourceData.csv_rows.length > 0) {
+      const rows = remapState.sourceData.csv_rows;
+      const headers = Object.keys(rows[0] ?? {});
+      setParsed({ headers, rows, rowCount: rows.length });
+      if (remapState.sourceData.csv_mapping) {
+        setMapping(remapState.sourceData.csv_mapping.map(m => ({ file_column: m.file_column, target: m.target })));
+      } else {
+        setMapping(buildInitialMapping(headers, questionTitles));
+      }
+    }
+  }, [remapState]);
 
   // All possible submission targets
   const SUBMISSION_TARGETS = [
@@ -1987,17 +2202,30 @@ function SubmissionsUploadTab({ app, onSave, uploadType }: { app: Application; o
       finalSubmissions = [...existingSubs, ...toAdd];
     }
 
-    const updated: Application = {
+    const preSnapshot = captureDataSnapshot(app);
+    let updated: Application = {
       ...app,
       questions: newQuestions,
       submissions: finalSubmissions,
     };
+    updated = addLoadHistoryEntry(
+      updated,
+      "csv-submissions",
+      `Imported ${dedupedNew.length} submissions from CSV (${importMode})`,
+      dedupedNew.length,
+      preSnapshot,
+      parsed ? {
+        csv_rows: parsed.rows,
+        csv_mapping: mapping.map(m => ({ file_column: m.file_column, target: m.target })),
+      } : undefined
+    );
 
     onSave(updated);
     setParsed(null);
     setMapping([]);
     setImporting(false);
     if (fileRef.current) fileRef.current.value = "";
+    if (remapState && onRemapComplete) onRemapComplete();
   }
 
   function clearSubmissions() {
@@ -2608,12 +2836,31 @@ function SubmissionsUploadTab({ app, onSave, uploadType }: { app: Application; o
 // Financial Upload Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
-function FinancialUploadTab({ app, onSave }: { app: Application; onSave: (a: Application) => void }) {
+function FinancialUploadTab({ app, onSave, remapState, onRemapComplete }: {
+  app: Application;
+  onSave: (a: Application) => void;
+  remapState?: { sourceType: LoadSourceType; sourceData: LoadHistorySourceData; entryTimestamp: string } | null;
+  onRemapComplete?: () => void;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<{ headers: string[]; rows: Record<string, string>[]; rowCount: number } | null>(null);
   const [mapping, setMapping] = useState<{ file_column: string; target: string }[]>([]);
   const [importing, setImporting] = useState(false);
   const [importMode, setImportMode] = useState<"append" | "replace">("append");
+
+  // Pre-fill from re-map state
+  useEffect(() => {
+    if (remapState?.sourceData?.csv_rows && remapState.sourceData.csv_rows.length > 0) {
+      const rows = remapState.sourceData.csv_rows;
+      const headers = Object.keys(rows[0] ?? {});
+      setParsed({ headers, rows, rowCount: rows.length });
+      if (remapState.sourceData.csv_mapping) {
+        setMapping(remapState.sourceData.csv_mapping.map(m => ({ file_column: m.file_column, target: m.target })));
+      } else {
+        setMapping(buildInitialMapping(headers));
+      }
+    }
+  }, [remapState]);
 
   const FIN_TARGETS = [
     { value: "skip", label: "— Skip —" },
@@ -2750,11 +2997,25 @@ function FinancialUploadTab({ app, onSave }: { app: Application; onSave: (a: App
       updatedSubs = syncFinRecordToSub(updatedSubs, rec);
     }
 
-    onSave({ ...app, financial_records: mergedRecords, submissions: updatedSubs });
+    const preSnapshot = captureDataSnapshot(app);
+    let updated: Application = { ...app, financial_records: mergedRecords, submissions: updatedSubs };
+    updated = addLoadHistoryEntry(
+      updated,
+      "csv-financial",
+      `Imported ${dedupedNew.length} financial records from CSV`,
+      dedupedNew.length,
+      preSnapshot,
+      parsed ? {
+        csv_rows: parsed.rows,
+        csv_mapping: mapping.map(m => ({ file_column: m.file_column, target: m.target })),
+      } : undefined
+    );
+    onSave(updated);
     setParsed(null);
     setMapping([]);
     setImporting(false);
     if (fileRef.current) fileRef.current.value = "";
+    if (remapState && onRemapComplete) onRemapComplete();
   }
 
   function updateRecord(email: string, updates: Partial<FinancialRecord>) {
@@ -3107,7 +3368,12 @@ function FinancialUploadTab({ app, onSave }: { app: Application; onSave: (a: App
 // Call Results Upload Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
-function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: Application) => void }) {
+function CallResultsUploadTab({ app, onSave, remapState, onRemapComplete }: {
+  app: Application;
+  onSave: (a: Application) => void;
+  remapState?: { sourceType: LoadSourceType; sourceData: LoadHistorySourceData; entryTimestamp: string } | null;
+  onRemapComplete?: () => void;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<{ headers: string[]; rows: Record<string, string>[]; rowCount: number } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -3120,6 +3386,25 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
   const [bookedCol, setBookedCol] = useState("");
   const [showedCol, setShowedCol] = useState("");
   const [closedCol, setClosedCol] = useState("");
+
+  // Pre-fill from re-map state
+  useEffect(() => {
+    if (remapState?.sourceData?.csv_rows && remapState.sourceData.csv_rows.length > 0) {
+      const rows = remapState.sourceData.csv_rows;
+      const headers = Object.keys(rows[0] ?? {});
+      setParsed({ headers, rows, rowCount: rows.length });
+      if (remapState.sourceData.csv_mapping) {
+        for (const m of remapState.sourceData.csv_mapping) {
+          if (m.target === "email") setEmailCol(m.file_column);
+          else if (m.target === "booking_date") setBookingDateCol(m.file_column);
+          else if (m.target === "close_date") setCloseDateCol(m.file_column);
+          else if (m.target === "booked" || m.target === "booking.booked") setBookedCol(m.file_column);
+          else if (m.target === "showed" || m.target === "booking.showed") setShowedCol(m.file_column);
+          else if (m.target === "closed" || m.target === "booking.closed") setClosedCol(m.file_column);
+        }
+      }
+    }
+  }, [remapState]);
 
   // Value matching mode: "any" = any non-empty value, "specific" = match selected values, "email" = column contains emails
   type MatchMode = "any" | "specific" | "email";
@@ -3341,10 +3626,31 @@ function CallResultsUploadTab({ app, onSave }: { app: Application; onSave: (a: A
       updatedSubs = syncCallRecordToSub(updatedSubs, rec);
     }
 
-    onSave({ ...app, call_results: mergedRecords, submissions: updatedSubs });
+    const preSnapshot = captureDataSnapshot(app);
+    let updated: Application = { ...app, call_results: mergedRecords, submissions: updatedSubs };
+    updated = addLoadHistoryEntry(
+      updated,
+      "csv-call-results",
+      `Imported ${dedupedNew.length} call results from CSV`,
+      dedupedNew.length,
+      preSnapshot,
+      parsed ? {
+        csv_rows: parsed.rows,
+        csv_mapping: [
+          { file_column: emailCol, target: "email" },
+          ...(bookingDateCol ? [{ file_column: bookingDateCol, target: "booking_date" }] : []),
+          ...(closeDateCol ? [{ file_column: closeDateCol, target: "close_date" }] : []),
+          ...(bookedCol ? [{ file_column: bookedCol, target: "booking.booked" }] : []),
+          ...(showedCol ? [{ file_column: showedCol, target: "booking.showed" }] : []),
+          ...(closedCol ? [{ file_column: closedCol, target: "booking.closed" }] : []),
+        ],
+      } : undefined
+    );
+    onSave(updated);
     setParsed(null);
     setImporting(false);
     if (fileRef.current) fileRef.current.value = "";
+    if (remapState && onRemapComplete) onRemapComplete();
   }
 
   function updateRecord(email: string, updates: Partial<CallResultRecord>) {
@@ -4011,6 +4317,7 @@ function WebhooksTab({
     setSavingMapping(true);
     try {
       const mappedSourceFields = new Set(mappingEdits.map(m => m.source_field));
+      const preSnapshot = captureDataSnapshot(app);
       let updated = { ...app };
 
       // Helper: flatten a pending item's payload
@@ -4056,6 +4363,20 @@ function WebhooksTab({
         last_field_signature: cumulativeSignature,
       };
       updated.pending_webhook_submissions = remaining;
+
+      // Add load history entry if any pending items were processed
+      const processedCount = allPending.length - remaining.length;
+      if (processedCount > 0) {
+        updated = addLoadHistoryEntry(
+          updated,
+          "webhook-batch",
+          `Saved mapping and processed ${processedCount} pending webhook submission${processedCount > 1 ? "s" : ""}`,
+          processedCount,
+          preSnapshot,
+          { webhook_field_mapping: mappingEdits, webhook_pending_ids: allPending.filter(p => !remaining.includes(p)).map(p => p.id) }
+        );
+      }
+
       onSave(updated);
     } finally {
       setSavingMapping(false);
@@ -4075,6 +4396,7 @@ function WebhooksTab({
   async function acceptPending(pendingItem: PendingWebhookSubmission) {
     setProcessingPendingId(pendingItem.id);
     try {
+      const preSnapshot = captureDataSnapshot(app);
       const questionTitles = app.questions.map(q => q.title);
 
       // Helper: flatten a pending item's payload
@@ -4150,6 +4472,18 @@ function WebhooksTab({
           : undefined,
         pending_webhook_submissions: remainingPending,
       };
+
+      // Add load history entry
+      const totalProcessed = processedIds.size;
+      updated = addLoadHistoryEntry(
+        updated,
+        "webhook-batch",
+        `Accepted and processed ${totalProcessed} pending webhook submission${totalProcessed > 1 ? "s" : ""}`,
+        totalProcessed,
+        preSnapshot,
+        { webhook_field_mapping: newMappings, webhook_pending_ids: Array.from(processedIds) }
+      );
+
       setMappingEdits(newMappings);
       onSave(updated);
     } finally {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readProfile, writeProfile } from "@/lib/store";
 import type { Application, ApplicationQuestion, AppSubmission, AppSubmissionAnswer } from "@/lib/types";
+import { captureDataSnapshot, addLoadHistoryEntry } from "@/lib/loadHistory";
 
 export const dynamic = "force-dynamic";
 
@@ -187,17 +188,31 @@ export async function POST(
 
   const existing = profile.applications[idx];
 
+  // Capture snapshot before merge for load history
+  const preSnapshot = captureDataSnapshot(existing);
+
   // Merge submissions: don't duplicate by response_id
   const existingIds = new Set((existing.submissions ?? []).map((s) => s.id));
   const newSubs = submissions.filter((s) => !existingIds.has(s.id));
 
-  const updated: Application = {
+  let updated: Application = {
     ...existing,
     typeform_pat: pat,
     typeform_form_id: form_id,
     questions,
     submissions: [...(existing.submissions ?? []), ...newSubs],
   };
+
+  // Add load history entry
+  if (newSubs.length > 0) {
+    updated = addLoadHistoryEntry(
+      updated,
+      "typeform-sync",
+      `Synced ${newSubs.length} submissions from Typeform`,
+      newSubs.length,
+      preSnapshot
+    );
+  }
 
   profile.applications[idx] = updated;
   await writeProfile(clientId, profile);

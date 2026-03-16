@@ -9,6 +9,7 @@ import {
   mergeWebhookData,
 } from "@/lib/webhookUtils";
 import type { PendingWebhookSubmission } from "@/lib/types";
+import { captureDataSnapshot, addLoadHistoryEntry } from "@/lib/loadHistory";
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -115,6 +116,9 @@ export async function POST(
       );
     }
 
+    // Capture snapshot before merge for load history
+    const preSnapshot = captureDataSnapshot(app);
+
     // Apply mapping and merge
     const mappedData = applyFieldMapping(
       flatPayload,
@@ -127,7 +131,16 @@ export async function POST(
       mappedData.submitted_at = submittedAt;
     }
 
-    const updatedApp = mergeWebhookData(app, mappedData);
+    let updatedApp = mergeWebhookData(app, mappedData);
+
+    // Add load history entry
+    updatedApp = addLoadHistoryEntry(
+      updatedApp,
+      "webhook-auto",
+      `Auto-processed webhook from ${config.source}${mappedData.email ? ` (${mappedData.email})` : ""}`,
+      1,
+      preSnapshot
+    );
 
     // Preserve config changes
     updatedApp.webhook_config = config;
