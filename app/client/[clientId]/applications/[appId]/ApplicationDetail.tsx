@@ -593,7 +593,6 @@ function QuestionCard({
     setGenerating(true);
     setGenError(null);
     try {
-      const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") : null;
       const res = await fetch(`/api/clients/${clientId}/applications/${appId}/generate-grading-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -605,7 +604,6 @@ function QuestionCard({
           questionChoices: question.choices,
           templateId: question.grading_prompt_template,
           companyDescription: companyDescription || undefined,
-          apiKey,
         }),
       });
       const data = await res.json();
@@ -1239,12 +1237,10 @@ function QuestionsTab({
     setShowAuditRegenConfirm(false);
     setShowAuditNotes(false);
     try {
-      const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
-      if (!apiKey) { setAuditError("Add your Anthropic API key in Settings on the home page."); return; }
       const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/generate-audit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, clientNotes: auditNotes.trim() || undefined }),
+        body: JSON.stringify({ clientNotes: auditNotes.trim() || undefined }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1279,12 +1275,10 @@ function QuestionsTab({
     setShowGradingAuditRegenConfirm(false);
     setShowGradingAuditNotes(false);
     try {
-      const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
-      if (!apiKey) { setGradingAuditError("Add your Anthropic API key in Settings on the home page."); return; }
       const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/generate-grading-audit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, clientNotes: gradingAuditNotes.trim() || undefined }),
+        body: JSON.stringify({ clientNotes: gradingAuditNotes.trim() || undefined }),
       });
       const data = await res.json();
       if (data.success) {
@@ -4948,7 +4942,6 @@ Questions: ${(app.questions ?? []).length}`);
   async function sendDataChat() {
     const input = dataChatInput.trim();
     if (!input || dataChatLoading || !activeChat) return;
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") ?? "" : "";
     const userMsg: ChatMessage = { role: "user", content: input };
     const updatedMessages = [...activeChat.messages, userMsg];
     // Optimistically update
@@ -4960,7 +4953,7 @@ Questions: ${(app.questions ?? []).length}`);
       const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, context: "data", messages: updatedMessages, systemContext: buildDataContext() }),
+        body: JSON.stringify({ context: "data", messages: updatedMessages, systemContext: buildDataContext() }),
       });
       const data = await res.json();
       if (data.success) {
@@ -4980,11 +4973,6 @@ Questions: ${(app.questions ?? []).length}`);
   }, [activeChat?.messages.length, dataChatLoading]);
 
   async function generateNarrative() {
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("anthropic_api_key") : null;
-    if (!apiKey) {
-      setNarrativeError("No API key found. Add your Anthropic API key in Settings on the home page.");
-      return;
-    }
     setNarrativeGenerating(true);
     setNarrativeError(null);
     setShowRegenConfirm(false);
@@ -4992,7 +4980,7 @@ Questions: ${(app.questions ?? []).length}`);
       const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/generate-narrative`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (data.success) {

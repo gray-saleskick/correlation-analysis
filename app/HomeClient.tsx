@@ -38,13 +38,6 @@ export default function HomeClient({ initialClients, stats, userEmail }: { initi
   const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
-  // API key state
-  const [apiKey, setApiKey] = useState(() => {
-    if (typeof window !== "undefined") return localStorage.getItem("anthropic_api_key") ?? "";
-    return "";
-  });
-  const [apiKeySaved, setApiKeySaved] = useState(false);
-
   // Account management state
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -253,12 +246,6 @@ export default function HomeClient({ initialClients, stats, userEmail }: { initi
     setConfirmText("");
     setSettingsTab("general");
     setSettingsOpen(true);
-  }
-
-  function saveApiKey() {
-    localStorage.setItem("anthropic_api_key", apiKey);
-    setApiKeySaved(true);
-    setTimeout(() => setApiKeySaved(false), 2000);
   }
 
   const statCards = [
@@ -500,28 +487,6 @@ export default function HomeClient({ initialClients, stats, userEmail }: { initi
 
               {settingsTab === "general" && (
                 <>
-                  {/* API Key Section */}
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 mb-2">Anthropic API Key</p>
-                    <p className="text-[11px] text-slate-300 mb-2">Used for AI grading prompts. Stored locally in your browser.</p>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder="sk-ant-…"
-                        className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent font-mono"
-                      />
-                      <button
-                        onClick={saveApiKey}
-                        disabled={!apiKey.trim()}
-                        className="px-3 py-2 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors shrink-0"
-                      >
-                        {apiKeySaved ? "Saved ✓" : "Save"}
-                      </button>
-                    </div>
-                  </div>
-
                   {/* Delete Client Section */}
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-2">Delete a Client</p>
