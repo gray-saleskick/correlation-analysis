@@ -631,15 +631,22 @@ function QuestionCard({
   const isCorrelatable = CORRELATABLE_TYPES.includes(question.type);
 
   function generateChoicesFromSubmissions() {
-    // Collect unique raw answer values — do NOT split on commas.
-    // Each unique submission answer value becomes one answer choice.
     const values = new Set<string>();
+    const isMulti = question.allow_multiple_selection === true;
     for (const sub of submissions) {
       const ans = sub.answers.find(
         (a) => a.question_ref === qRef || a.question_title.toLowerCase() === question.title.toLowerCase()
       );
       if (ans?.value) {
-        values.add(ans.value.trim());
+        if (isMulti) {
+          // Split comma-delimited values into individual answers
+          for (const part of ans.value.split(",")) {
+            const trimmed = part.trim();
+            if (trimmed) values.add(trimmed);
+          }
+        } else {
+          values.add(ans.value.trim());
+        }
       }
     }
     const choiceList = Array.from(values).sort();
@@ -736,7 +743,7 @@ function QuestionCard({
             />
           </div>
 
-          {/* Type + Required */}
+          {/* Type + Allow multiple selection */}
           <div className="flex items-end gap-4 flex-wrap">
             <div>
               <label className="block text-[10px] font-semibold uppercase tracking-widest text-slate-300 mb-1">Type</label>
@@ -750,15 +757,17 @@ function QuestionCard({
                 ))}
               </select>
             </div>
-            <label className="flex items-center gap-1.5 text-xs text-slate-300 pb-2">
-              <input
-                type="checkbox"
-                checked={question.required}
-                onChange={(e) => onUpdate({ required: e.target.checked })}
-                className="w-4 h-4 rounded bg-white/[0.05] border border-white/[0.15] accent-indigo-500 shadow-sm shadow-black/20"
-              />
-              Required
-            </label>
+            {question.type === "multiple_choice" && (
+              <label className="flex items-center gap-1.5 text-xs text-slate-300 pb-2">
+                <input
+                  type="checkbox"
+                  checked={question.allow_multiple_selection ?? false}
+                  onChange={(e) => onUpdate({ allow_multiple_selection: e.target.checked })}
+                  className="w-4 h-4 rounded bg-white/[0.05] border border-white/[0.15] accent-indigo-500 shadow-sm shadow-black/20"
+                />
+                Allow multiple selection
+              </label>
+            )}
           </div>
 
           {/* Choices (for choice-type questions) */}
@@ -766,7 +775,18 @@ function QuestionCard({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[10px] font-semibold uppercase tracking-widest text-slate-300">Answer Choices</label>
-                {totalSubs > 0 && (
+                {(question.choices?.length ?? 0) > 0 ? (
+                  <button
+                    onClick={() => onUpdate({ choices: undefined })}
+                    className="flex items-center gap-1 text-[11px] text-red-400 hover:text-red-300 font-medium transition-colors"
+                    title="Remove all answer choices"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Remove all answers
+                  </button>
+                ) : totalSubs > 0 ? (
                   <button
                     onClick={generateChoicesFromSubmissions}
                     className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
@@ -777,7 +797,7 @@ function QuestionCard({
                     </svg>
                     Generate from submissions
                   </button>
-                )}
+                ) : null}
               </div>
               <div className="space-y-1.5">
                 {(question.choices ?? []).map((choice, ci) => (
@@ -817,17 +837,6 @@ function QuestionCard({
                   + Add choice
                 </button>
               </div>
-              {question.type === "multiple_choice" && (
-                <label className="flex items-center gap-1.5 text-xs text-slate-300 mt-1.5">
-                  <input
-                    type="checkbox"
-                    checked={question.allow_multiple_selection ?? false}
-                    onChange={(e) => onUpdate({ allow_multiple_selection: e.target.checked })}
-                    className="w-4 h-4 rounded bg-white/[0.05] border border-white/[0.15] accent-indigo-500 shadow-sm shadow-black/20"
-                  />
-                  Allow multiple selection
-                </label>
-              )}
             </div>
           )}
 
@@ -5194,8 +5203,8 @@ Questions: ${(app.questions ?? []).length}`);
         if (matched.length > 0) return matched;
       }
 
-      // Fallback: return the raw value as-is
-      return [rawVal];
+      // Choices are defined but nothing matched — exclude from correlation
+      return [];
     }
 
     for (const q of app.questions) {

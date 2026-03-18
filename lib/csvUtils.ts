@@ -132,7 +132,8 @@ export function autoDetectTarget(
   if (lower === "access to funding" || lower === "access_to_funding" || lower === "available funding" || lower === "available_funding") return "financial.available_funding";
   if (lower === "financial grade" || lower === "financial_grade") return "financial.grade";
 
-  return "skip";
+  // Default: treat unrecognized headers as questions (user can change to skip)
+  return `answer:${col}`;
 }
 
 export function buildInitialMapping(
