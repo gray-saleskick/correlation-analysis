@@ -61,8 +61,38 @@ const LNAME_TARGETS = ["lastname", "last name", "last_name"];
 const FULLNAME_TARGETS = ["fullname", "full name", "full_name", "name"];
 const PHONE_TARGETS = ["phone", "phonenumber", "phone number", "phone_number"];
 
+// Known system/metadata columns that should default to skip
+const SKIP_TARGETS = [
+  "source name", "source id", "sourcename", "sourceid",
+  "source_name", "source_id",
+];
+
 function norm(s: string) {
   return s.toLowerCase().replace(/[\s_-]/g, "");
+}
+
+/** Check if a string exactly matches one of the target lists */
+function exactMatch(s: string, targets: string[]): boolean {
+  const n = norm(s);
+  return targets.some((t) => norm(t) === n);
+}
+
+/** Check if a string contains keywords that indicate a constant field */
+function containsEmail(s: string): boolean {
+  const l = s.toLowerCase();
+  return l.includes("email address") || l.includes("email") || l.includes("e-mail");
+}
+function containsPhone(s: string): boolean {
+  const l = s.toLowerCase();
+  return l.includes("phone number") || l.includes("phone");
+}
+function containsFirstName(s: string): boolean {
+  const l = s.toLowerCase();
+  return /\bfirst\s*name\b/.test(l);
+}
+function containsLastName(s: string): boolean {
+  const l = s.toLowerCase();
+  return /\blast\s*name\b/.test(l);
 }
 
 export function autoDetectTarget(
@@ -72,11 +102,15 @@ export function autoDetectTarget(
   const n = norm(col);
   const lower = col.toLowerCase();
 
-  if (EMAIL_TARGETS.some((t) => norm(t) === n)) return "email";
-  if (FNAME_TARGETS.some((t) => norm(t) === n)) return "first_name";
-  if (LNAME_TARGETS.some((t) => norm(t) === n)) return "last_name";
-  if (FULLNAME_TARGETS.some((t) => norm(t) === n)) return "full_name";
-  if (PHONE_TARGETS.some((t) => norm(t) === n)) return "phone";
+  // Exact matches for constants
+  if (exactMatch(col, EMAIL_TARGETS)) return "email";
+  if (exactMatch(col, FNAME_TARGETS)) return "first_name";
+  if (exactMatch(col, LNAME_TARGETS)) return "last_name";
+  if (exactMatch(col, FULLNAME_TARGETS)) return "full_name";
+  if (exactMatch(col, PHONE_TARGETS)) return "phone";
+
+  // Known skip columns
+  if (SKIP_TARGETS.includes(lower) || SKIP_TARGETS.includes(n)) return "skip";
 
   if (n === "submissionid" || lower === "submission id") return "submission_id";
   if (n === "addedat" || lower === "added at") return "submitted_at";
@@ -100,40 +134,43 @@ export function autoDetectTarget(
   if (lower === "offer[1].value.amount") return "financial.available_credit";
   if (lower === "offer[2].value.amount") return "financial.available_funding";
 
-  const stripped = stripQuestionPrefix(col);
-  if (stripped) {
-    if (EMAIL_TARGETS.some((t) => norm(stripped) === norm(t)))
-      return "email";
-    if (FNAME_TARGETS.some((t) => norm(stripped) === norm(t)))
-      return "first_name";
-    if (LNAME_TARGETS.some((t) => norm(stripped) === norm(t)))
-      return "last_name";
-    if (FULLNAME_TARGETS.some((t) => norm(stripped) === norm(t)))
-      return "full_name";
-    if (PHONE_TARGETS.some((t) => norm(stripped) === norm(t)))
-      return "phone";
-    const matched = questionTitles.find(
-      (qt) => norm(qt) === norm(stripped) || norm(qt).startsWith(norm(stripped.slice(0, 15)))
-    );
-    if (matched) return `answer:${matched}`;
-    return `answer:${stripped}`;
-  }
+  // Strip #x - prefix if present (display cleanup only — doesn't determine if it's a question)
+  const stripped = stripQuestionPrefix(col) ?? col;
 
+  // Check stripped text for constant fields — exact first, then fuzzy contains
+  if (exactMatch(stripped, EMAIL_TARGETS)) return "email";
+  if (exactMatch(stripped, FNAME_TARGETS)) return "first_name";
+  if (exactMatch(stripped, LNAME_TARGETS)) return "last_name";
+  if (exactMatch(stripped, FULLNAME_TARGETS)) return "full_name";
+  if (exactMatch(stripped, PHONE_TARGETS)) return "phone";
+
+  // Fuzzy: header text *contains* email/phone/name keywords
+  if (containsEmail(stripped)) return "email";
+  if (containsFirstName(stripped)) return "first_name";
+  if (containsLastName(stripped)) return "last_name";
+  if (containsPhone(stripped)) return "phone";
+
+  // Booking & financial targets
   if (n === "showed" || n === "show" || lower === "did show") return "booking.showed";
   if (n === "closed" || n === "close" || lower === "did close") return "booking.closed";
   if (n === "booked" || n === "book" || lower === "did book") return "booking.booked";
   if (lower === "close date" || lower === "close_date" || lower === "closedate" || lower === "closed date" || lower === "closed_date") return "close_date";
   if (lower === "booking date" || lower === "booking_date" || lower === "bookingdate") return "booking_date";
 
-  // Financial record targets
   if (lower === "credit score" || lower === "credit_score") return "financial.credit_score";
   if (lower === "estimated income" || lower === "estimated_income" || lower === "income") return "financial.estimated_income";
   if (lower === "credit access" || lower === "credit_access" || lower === "available credit" || lower === "available_credit") return "financial.available_credit";
   if (lower === "access to funding" || lower === "access_to_funding" || lower === "available funding" || lower === "available_funding") return "financial.available_funding";
   if (lower === "financial grade" || lower === "financial_grade") return "financial.grade";
 
-  // Default: treat unrecognized headers as questions (user can change to skip)
-  return `answer:${col}`;
+  // Try matching against existing question titles
+  const matched = questionTitles.find(
+    (qt) => norm(qt) === norm(stripped) || norm(qt).startsWith(norm(stripped.slice(0, 15)))
+  );
+  if (matched) return `answer:${matched}`;
+
+  // Default: treat as question (user can change to skip)
+  return `answer:${stripped}`;
 }
 
 export function buildInitialMapping(
