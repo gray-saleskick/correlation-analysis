@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readApplicationFull } from "@/lib/db";
+import { readApplicationCore } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 30;
@@ -187,7 +187,7 @@ export async function POST(
 
     // Collect submission examples
     let examplesContext = "No submission data available.";
-    const app = await readApplicationFull(appId);
+    const app = await readApplicationCore(appId);
     if (app?.submissions?.length) {
       const { answers, gradedAnswers } = collectAnswersForQuestion(
         questionId ?? "",

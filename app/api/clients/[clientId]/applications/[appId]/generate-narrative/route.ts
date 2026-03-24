@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readApplicationFull } from "@/lib/db";
+import { readApplicationCore } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 60;
@@ -384,7 +384,7 @@ export async function POST(
       );
     }
 
-    const app = await readApplicationFull(appId);
+    const app = await readApplicationCore(appId);
     if (!app) {
       return NextResponse.json({ success: false, error: "Application not found" }, { status: 404 });
     }

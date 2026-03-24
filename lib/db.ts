@@ -754,6 +754,173 @@ export async function readApplicationFull(
   return app;
 }
 
+/**
+ * Lightweight read: only fetches questions, submissions+answers, financial, call_results.
+ * Used by AI generation routes (audit, narrative, grading) that don't need webhooks/chats/history.
+ */
+export async function readApplicationCore(
+  appId: string
+): Promise<Application | null> {
+  const { data: appRow, error: appError } = await supabase
+    .from("applications")
+    .select("id,title,source,added_at,narrative_analysis,narrative_generated_at,audit_analysis,audit_generated_at,audit_client_notes,grading_audit_analysis,grading_audit_generated_at,grading_audit_client_notes,grade_mappings,hidden_correlation_questions,correlation_answer_order")
+    .eq("id", appId)
+    .single();
+
+  if (appError || !appRow) return null;
+
+  // Parallel: questions, submissions, financial, call_results
+  const [questionsRes, submissionsRes, financialRes, callResultsRes] =
+    await Promise.all([
+      supabase
+        .from("application_questions")
+        .select("*")
+        .eq("application_id", appId)
+        .order("sort_order", { ascending: true }),
+      supabase
+        .from("submissions")
+        .select("*")
+        .eq("application_id", appId)
+        .order("submitted_at", { ascending: true }),
+      supabase
+        .from("financial_records")
+        .select("*")
+        .eq("application_id", appId),
+      supabase
+        .from("call_results")
+        .select("*")
+        .eq("application_id", appId),
+    ]);
+
+  // Fetch answers in parallel batches
+  const submissionIds = (submissionsRes.data ?? []).map(
+    (s: Record<string, unknown>) => s.id as string
+  );
+  let allAnswers: Record<string, unknown>[] = [];
+  if (submissionIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chunks: PromiseLike<any>[] = [];
+    for (let i = 0; i < submissionIds.length; i += 500) {
+      chunks.push(
+        supabase
+          .from("submission_answers")
+          .select("submission_id,question_ref,question_title,value")
+          .in("submission_id", submissionIds.slice(i, i + 500))
+      );
+    }
+    const results = await Promise.all(chunks);
+    for (const res of results) {
+      if (res.data) allAnswers.push(...res.data);
+    }
+  }
+
+  // Group answers by submission
+  const answersBySubmission = new Map<string, AppSubmissionAnswer[]>();
+  for (const a of allAnswers) {
+    const subId = a.submission_id as string;
+    if (!answersBySubmission.has(subId)) answersBySubmission.set(subId, []);
+    answersBySubmission.get(subId)!.push({
+      question_ref: a.question_ref as string,
+      question_title: a.question_title as string,
+      value: (a.value as string) ?? null,
+    });
+  }
+
+  const questions: ApplicationQuestion[] = (questionsRes.data ?? []).map(
+    (q: Record<string, unknown>) => ({
+      id: q.id as string,
+      ref: (q.ref as string) ?? undefined,
+      title: q.title as string,
+      type: q.type as ApplicationQuestion["type"],
+      required: (q.required as boolean) ?? false,
+      choices: (q.choices as ApplicationQuestion["choices"]) ?? undefined,
+      allow_multiple_selection: (q.allow_multiple_selection as boolean) ?? undefined,
+      order: (q.sort_order as number) ?? 0,
+      grading_prompt_template: (q.grading_prompt_template as string) ?? undefined,
+      grading_prompt: (q.grading_prompt as string) ?? undefined,
+      drop_off_rate: (q.drop_off_rate as number) ?? undefined,
+    })
+  );
+
+  const submissions: AppSubmission[] = (submissionsRes.data ?? []).map(
+    (s: Record<string, unknown>) => {
+      const subId = s.id as string;
+      return {
+        id: subId,
+        submitted_at: (s.submitted_at as string) ?? "",
+        booking_date: (s.booking_date as string) ?? undefined,
+        respondent_email: (s.respondent_email as string) ?? undefined,
+        respondent_name: (s.respondent_name as string) ?? undefined,
+        respondent_phone: (s.respondent_phone as string) ?? undefined,
+        source: (s.source as AppSubmission["source"]) ?? undefined,
+        answers: answersBySubmission.get(subId) ?? [],
+        grade: s.final_grade != null || s.answer_grade != null || s.financial_grade != null
+          ? {
+              final_grade: (s.final_grade as number) ?? undefined,
+              answer_grade: (s.answer_grade as number) ?? undefined,
+              financial_grade: (s.financial_grade as number) ?? undefined,
+              was_disqualified: (s.was_disqualified as boolean) ?? undefined,
+              was_spam: (s.was_spam as boolean) ?? undefined,
+              details: (s.grade_details as string) ?? undefined,
+            }
+          : undefined,
+        financial: s.fin_credit_score != null || s.fin_estimated_income != null
+          ? {
+              credit_score: (s.fin_credit_score as number) ?? undefined,
+              estimated_income: (s.fin_estimated_income as number) ?? undefined,
+              available_credit: (s.fin_available_credit as number) ?? undefined,
+              available_funding: (s.fin_available_funding as number) ?? undefined,
+            }
+          : undefined,
+      };
+    }
+  );
+
+  const financialRecords: FinancialRecord[] = (financialRes.data ?? []).map(
+    (r: Record<string, unknown>) => ({
+      email: r.email as string,
+      financial_grade: (r.financial_grade as number) ?? undefined,
+      credit_score: (r.credit_score as number) ?? undefined,
+      estimated_income: (r.estimated_income as number) ?? undefined,
+      credit_access: (r.credit_access as number) ?? undefined,
+      access_to_funding: (r.access_to_funding as number) ?? undefined,
+    })
+  );
+
+  const callResults: CallResultRecord[] = (callResultsRes.data ?? []).map(
+    (r: Record<string, unknown>) => ({
+      email: r.email as string,
+      booking_date: (r.booking_date as string) ?? undefined,
+      close_date: (r.close_date as string) ?? undefined,
+      booked: (r.booked as boolean) ?? false,
+      showed: (r.showed as boolean) ?? false,
+      closed: (r.closed as boolean) ?? false,
+    })
+  );
+
+  return {
+    id: appRow.id,
+    title: appRow.title,
+    source: appRow.source ?? "manual",
+    added_at: appRow.added_at ?? "",
+    questions,
+    submissions: submissions.length > 0 ? submissions : undefined,
+    financial_records: financialRecords.length > 0 ? financialRecords : undefined,
+    call_results: callResults.length > 0 ? callResults : undefined,
+    narrative_analysis: appRow.narrative_analysis ?? undefined,
+    narrative_generated_at: appRow.narrative_generated_at ?? undefined,
+    audit_analysis: appRow.audit_analysis ?? undefined,
+    audit_generated_at: appRow.audit_generated_at ?? undefined,
+    audit_client_notes: appRow.audit_client_notes ?? undefined,
+    grading_audit_analysis: appRow.grading_audit_analysis ?? undefined,
+    grading_audit_generated_at: appRow.grading_audit_generated_at ?? undefined,
+    grading_audit_client_notes: appRow.grading_audit_client_notes ?? undefined,
+    grade_mappings: appRow.grade_mappings ?? undefined,
+    hidden_correlation_questions: appRow.hidden_correlation_questions ?? undefined,
+    correlation_answer_order: appRow.correlation_answer_order ?? undefined,
+  } as Application;
+}
+
 export async function createApplication(
   clientId: string,
   title: string
