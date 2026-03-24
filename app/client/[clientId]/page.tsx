@@ -25,6 +25,7 @@ export default async function Page({ params }: { params: Promise<{ clientId: str
       source: a.source as "manual",
       added_at: a.added_at,
       questions: [],
+      submissions: new Array(a.submissionCount) as never[], // length used for count display
     })),
   };
 

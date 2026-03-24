@@ -284,11 +284,12 @@ export async function listApplications(
     source: string;
     added_at: string;
     share_enabled: boolean;
+    submissionCount: number;
   }[]
 > {
   const { data, error } = await supabase
     .from("applications")
-    .select("id, title, source, added_at, share_enabled")
+    .select("id, title, source, added_at, share_enabled, submissions(count)")
     .eq("client_id", clientId)
     .order("added_at", { ascending: true });
 
@@ -296,12 +297,15 @@ export async function listApplications(
     console.error("listApplications error:", error.message);
     return [];
   }
-  return (data ?? []).map((r) => ({
-    id: r.id,
-    title: r.title,
-    source: r.source,
-    added_at: r.added_at,
-    share_enabled: r.share_enabled ?? false,
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    id: r.id as string,
+    title: r.title as string,
+    source: r.source as string,
+    added_at: r.added_at as string,
+    share_enabled: (r.share_enabled as boolean) ?? false,
+    submissionCount: Array.isArray(r.submissions) && r.submissions.length > 0
+      ? (r.submissions[0] as { count: number }).count
+      : 0,
   }));
 }
 
