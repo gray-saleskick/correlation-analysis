@@ -23,16 +23,18 @@ function uid(): string {
  * Only clones the data that changes during loads — not config, narratives, chats, etc.
  */
 export function captureDataSnapshot(app: Application): LoadHistoryDataSnapshot {
-  return JSON.parse(
-    JSON.stringify({
-      submissions: app.submissions,
-      questions: app.questions,
-      financial_records: app.financial_records,
-      call_results: app.call_results,
-      bookings: app.bookings,
-      pending_webhook_submissions: app.pending_webhook_submissions,
-    })
-  );
+  const data = {
+    submissions: app.submissions,
+    questions: app.questions,
+    financial_records: app.financial_records,
+    call_results: app.call_results,
+    bookings: app.bookings,
+    pending_webhook_submissions: app.pending_webhook_submissions,
+  };
+  // structuredClone is 2-3x faster than JSON.parse(JSON.stringify()) for large objects
+  return typeof structuredClone === "function"
+    ? structuredClone(data)
+    : JSON.parse(JSON.stringify(data));
 }
 
 /**

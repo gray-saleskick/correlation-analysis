@@ -71,6 +71,41 @@ export async function writeProfile(clientId: string, profile: ClientProfile): Pr
   }
 }
 
+/**
+ * Update a single application within a profile without reading the full profile.
+ * Uses a Supabase RPC that does a targeted jsonb_set, falling back to full
+ * read-modify-write if the RPC isn't deployed yet.
+ */
+export async function writeApplication(
+  clientId: string,
+  appId: string,
+  appData: import("./types").Application
+): Promise<void> {
+  if (!isValidId(clientId)) throw new Error("Invalid clientId");
+
+  // Try targeted RPC first (no full profile read needed)
+  const { data, error: rpcError } = await supabase.rpc("update_application", {
+    p_client_id: clientId,
+    p_app_id: appId,
+    p_app_data: appData,
+  });
+
+  if (!rpcError && data === true) return;
+
+  // Fallback: full read-modify-write
+  if (rpcError) {
+    console.warn("update_application RPC not available, falling back to full write");
+  }
+  const profile = await readProfile(clientId);
+  if (!profile) throw new Error("Client not found");
+
+  const idx = profile.applications.findIndex((a) => a.id === appId);
+  if (idx < 0) throw new Error("Application not found");
+
+  profile.applications[idx] = appData;
+  await writeProfile(clientId, profile);
+}
+
 export async function createClient(clientName: string): Promise<ClientProfile> {
   // Sanitize client name for ID
   const clientId =
@@ -134,7 +169,7 @@ export interface AggregateStats {
 }
 
 export async function getAggregateStats(): Promise<AggregateStats> {
-  const stats: AggregateStats = {
+  const empty: AggregateStats = {
     totalClients: 0,
     totalApplications: 0,
     totalSubmissions: 0,
@@ -148,15 +183,34 @@ export async function getAggregateStats(): Promise<AggregateStats> {
     totalCloses: 0,
   };
 
-  // Only select the applications array from the profile JSONB — avoids downloading
-  // the full nested submissions/financial/call data for every client.
+  // Try server-side RPC first (zero data transfer — DB computes everything)
+  const { data: rpcData, error: rpcError } = await supabase.rpc("get_aggregate_stats");
+  if (!rpcError && rpcData) {
+    return {
+      totalClients: Number(rpcData.totalClients) || 0,
+      totalApplications: Number(rpcData.totalApplications) || 0,
+      totalSubmissions: Number(rpcData.totalSubmissions) || 0,
+      totalCallResults: Number(rpcData.totalCallResults) || 0,
+      totalFinancialRecords: Number(rpcData.totalFinancialRecords) || 0,
+      totalQuestions: Number(rpcData.totalQuestions) || 0,
+      totalAuditsGenerated: Number(rpcData.totalAuditsGenerated) || 0,
+      totalGradingAuditsGenerated: Number(rpcData.totalGradingAuditsGenerated) || 0,
+      totalBookings: Number(rpcData.totalBookings) || 0,
+      totalShows: Number(rpcData.totalShows) || 0,
+      totalCloses: Number(rpcData.totalCloses) || 0,
+    };
+  }
+
+  // Fallback: JS-side computation (used if RPC not yet deployed)
+  console.warn("get_aggregate_stats RPC not available, falling back to JS computation");
   const { data, error } = await supabase
     .from("clients")
     .select("profile->applications")
     .neq("client_id", "__users__");
 
-  if (error || !data) return stats;
+  if (error || !data) return empty;
 
+  const stats = { ...empty };
   for (const row of data) {
     stats.totalClients++;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

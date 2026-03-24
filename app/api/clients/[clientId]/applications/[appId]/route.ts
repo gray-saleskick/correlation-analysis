@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readProfile, writeProfile } from "@/lib/store";
+import { readProfile, writeProfile, writeApplication } from "@/lib/store";
 import type { Application } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -39,20 +39,12 @@ export async function PUT(
       return NextResponse.json({ error: "Payload too large" }, { status: 413 });
     }
 
-    const profile = await readProfile(clientId);
-    if (!profile) return NextResponse.json({ error: "Client not found" }, { status: 404 });
-
     const body = (await req.json()) as { application: Application };
     if (!body.application) {
       return NextResponse.json({ error: "Missing application data" }, { status: 400 });
     }
 
-    const idx = profile.applications.findIndex((a) => a.id === appId);
-    if (idx < 0) {
-      return NextResponse.json({ error: "Application not found" }, { status: 404 });
-    }
-
-    // Preserve the original ID and strip any sensitive fields that shouldn't be updated via PUT
+    // Preserve the original ID
     const updated = { ...body.application, id: appId };
 
     // Validate title length if present
@@ -60,8 +52,8 @@ export async function PUT(
       return NextResponse.json({ error: "Title must be under 200 characters" }, { status: 400 });
     }
 
-    profile.applications[idx] = updated;
-    await writeProfile(clientId, profile);
+    // Targeted write: updates just this app in the JSONB array (no full profile read)
+    await writeApplication(clientId, appId, updated);
 
     return NextResponse.json({ success: true });
   } catch (err) {

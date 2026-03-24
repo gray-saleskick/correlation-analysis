@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { hasWebhookAccess } from "@/lib/featureFlags";
 import { supabase } from "@/lib/supabase";
-import type { ClientProfile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 10;
@@ -14,9 +13,10 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
+    // Only fetch the fields we need via JSONB projection
     const { data, error } = await supabase
       .from("clients")
-      .select("client_id, profile")
+      .select("client_id, profile->clientId, profile->clientName, profile->applications")
       .neq("client_id", "__users__");
 
     if (error || !data) {
@@ -33,19 +33,25 @@ export async function GET() {
       pendingCount: number;
     }[] = [];
 
-    for (const row of data) {
-      const profile = row.profile as ClientProfile;
-      for (const app of profile.applications) {
+    for (const row of data as Record<string, unknown>[]) {
+      const clientId = row.clientId as string;
+      const clientName = row.clientName as string;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const applications = row.applications as any[] | null;
+      if (!applications) continue;
+
+      for (const app of applications) {
         if (app.webhook_config) {
           apps.push({
-            clientId: profile.clientId,
-            clientName: profile.clientName,
+            clientId,
+            clientName,
             appId: app.id,
             appTitle: app.title,
             source: app.webhook_config.source,
             lastReceived: app.webhook_config.last_received_at,
             pendingCount: (app.pending_webhook_submissions ?? []).filter(
-              (p) => p.status === "pending"
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (p: any) => p.status === "pending"
             ).length,
           });
         }
