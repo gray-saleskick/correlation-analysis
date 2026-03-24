@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY!;
 
-const SUPABASE_TIMEOUT_MS = 8_000; // 8 second timeout for all Supabase queries
+const SUPABASE_TIMEOUT_MS = 30_000; // 30 second timeout for Supabase queries
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   global: {
