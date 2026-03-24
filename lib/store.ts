@@ -13,11 +13,9 @@ export function uid(): string {
 export async function listClients(): Promise<
   { clientId: string; clientName: string; created_at: string; appCount: number }[]
 > {
-  // Only fetch the 3 fields we need via JSONB projection — avoids downloading
-  // full nested submissions/financial data for every client.
   const { data, error } = await supabase
     .from("clients")
-    .select("client_id, profile->clientName, profile->created_at, profile->applications")
+    .select("client_id, profile")
     .neq("client_id", "__users__")
     .order("created_at", { ascending: true });
 
@@ -27,12 +25,15 @@ export async function listClients(): Promise<
   }
 
   return (data ?? [])
-    .map((row: Record<string, unknown>) => ({
-      clientId: row.client_id as string,
-      clientName: (row.clientName as string) ?? "",
-      created_at: (row.created_at as string) ?? "",
-      appCount: Array.isArray(row.applications) ? row.applications.length : 0,
-    }))
+    .map((row) => {
+      const profile = row.profile as ClientProfile;
+      return {
+        clientId: profile.clientId,
+        clientName: profile.clientName,
+        created_at: profile.created_at,
+        appCount: profile.applications.length,
+      };
+    })
     .sort((a, b) => a.clientName.localeCompare(b.clientName));
 }
 
@@ -205,7 +206,7 @@ export async function getAggregateStats(): Promise<AggregateStats> {
   console.warn("get_aggregate_stats RPC not available, falling back to JS computation");
   const { data, error } = await supabase
     .from("clients")
-    .select("profile->applications")
+    .select("client_id, profile")
     .neq("client_id", "__users__");
 
   if (error || !data) return empty;
@@ -213,8 +214,7 @@ export async function getAggregateStats(): Promise<AggregateStats> {
   const stats = { ...empty };
   for (const row of data) {
     stats.totalClients++;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const apps = (row as any).applications as any[] | null;
+    const apps = (row.profile as ClientProfile)?.applications;
     if (!apps) continue;
     for (const app of apps) {
       stats.totalApplications++;
