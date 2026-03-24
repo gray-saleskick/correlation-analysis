@@ -8,15 +8,33 @@
  * Requires SUPABASE_URL and SUPABASE_SERVICE_KEY in .env.local
  */
 
-import "dotenv/config";
+import { config } from "dotenv";
+config({ path: ".env.local" });
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
+  process.env.SUPABASE_SERVICE_KEY!,
+  {
+    global: {
+      fetch: (url, options = {}) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min timeout
+        return fetch(url, { ...options, signal: controller.signal })
+          .finally(() => clearTimeout(timeoutId));
+      },
+    },
+  }
 );
 
 const DRY_RUN = !process.argv.includes("--execute");
+
+function isValidTimestamp(val: unknown): boolean {
+  if (!val || typeof val !== "string") return false;
+  if (val === "#N/A" || val === "N/A" || val === "null" || val === "undefined") return false;
+  const d = new Date(val);
+  return !isNaN(d.getTime());
+}
 
 interface MigrationCounts {
   users: number;
@@ -81,17 +99,33 @@ async function migrate() {
 
   // ── 2. Migrate Clients + Applications ─────────────────────────────
   console.log("\n── Migrating clients and applications...");
-  const { data: clientRows, error: clientErr } = await supabase
+
+  // First get just the client IDs (lightweight query)
+  const { data: clientIdRows, error: idErr } = await supabase
     .from("clients")
-    .select("client_id, profile")
+    .select("client_id")
     .neq("client_id", "__users__");
 
-  if (clientErr) {
-    console.error("❌ Failed to read clients:", clientErr.message);
+  if (idErr) {
+    console.error("❌ Failed to read client IDs:", idErr.message);
     return;
   }
 
-  for (const row of clientRows ?? []) {
+  // Then fetch each client's full profile one at a time (avoids timeout)
+  for (const { client_id } of clientIdRows ?? []) {
+    console.log(`  Processing client: ${client_id}...`);
+    const { data: rowData, error: rowErr } = await supabase
+      .from("clients")
+      .select("client_id, profile")
+      .eq("client_id", client_id)
+      .single();
+
+    if (rowErr || !rowData) {
+      console.error(`  ❌ Failed to read client ${client_id}:`, rowErr?.message);
+      continue;
+    }
+    const row = rowData;
+    // -- original loop body continues below --
     const profile = row.profile as Record<string, unknown>;
     if (!profile) continue;
 
@@ -209,7 +243,7 @@ async function migrateApplication(clientId: string, app: Record<string, unknown>
     const { error: subErr } = await supabase.from("submissions").upsert({
       id: subId,
       application_id: appId,
-      submitted_at: (sub.submitted_at as string) ?? null,
+      submitted_at: isValidTimestamp(sub.submitted_at as string) ? (sub.submitted_at as string) : null,
       booking_date: (sub.booking_date as string) ?? null,
       respondent_email: (sub.respondent_email as string) ?? null,
       respondent_name: (sub.respondent_name as string) ?? null,
