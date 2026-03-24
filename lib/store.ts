@@ -149,14 +149,21 @@ export async function getAggregateStats(): Promise<AggregateStats> {
     totalCloses: 0,
   };
 
-  const { data, error } = await supabase.from("clients").select("client_id, profile").neq("client_id", "__users__");
+  // Only select the applications array from the profile JSONB — avoids downloading
+  // the full nested submissions/financial/call data for every client.
+  const { data, error } = await supabase
+    .from("clients")
+    .select("profile->applications")
+    .neq("client_id", "__users__");
 
   if (error || !data) return stats;
 
   for (const row of data) {
-    const profile = row.profile as ClientProfile;
     stats.totalClients++;
-    for (const app of profile.applications) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const apps = (row as any).applications as any[] | null;
+    if (!apps) continue;
+    for (const app of apps) {
       stats.totalApplications++;
       stats.totalSubmissions += app.submissions?.length ?? 0;
       stats.totalFinancialRecords += app.financial_records?.length ?? 0;

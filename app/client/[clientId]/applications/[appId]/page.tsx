@@ -1,9 +1,13 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import { readProfile } from "@/lib/store";
 import { getSession } from "@/lib/auth";
 import ApplicationDetail from "./ApplicationDetail";
 
 export const dynamic = "force-dynamic";
+
+// Deduplicate readProfile calls within a single request (Page + generateMetadata)
+const getCachedProfile = cache((clientId: string) => readProfile(clientId));
 
 interface PageProps {
   params: Promise<{ clientId: string; appId: string }>;
@@ -12,7 +16,7 @@ interface PageProps {
 export default async function ApplicationDetailPage({ params }: PageProps) {
   const { clientId, appId } = await params;
   const [profile, session] = await Promise.all([
-    readProfile(clientId),
+    getCachedProfile(clientId),
     getSession(),
   ]);
   if (!profile) notFound();
@@ -33,7 +37,7 @@ export default async function ApplicationDetailPage({ params }: PageProps) {
 
 export async function generateMetadata({ params }: { params: Promise<{ clientId: string; appId: string }> }) {
   const { clientId, appId } = await params;
-  const profile = await readProfile(clientId);
+  const profile = await getCachedProfile(clientId);
   const app = profile?.applications.find((a) => a.id === appId);
   return { title: app ? `${app.title} — Correlation Analysis` : "Application — Correlation Analysis" };
 }

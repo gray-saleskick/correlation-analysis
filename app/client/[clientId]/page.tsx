@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { readProfile } from "@/lib/store";
 import ClientDetailPage from "./ClientDetailPage";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 10; // ISR: cache for 10 seconds
 
 export default async function Page({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
