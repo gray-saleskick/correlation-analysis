@@ -58,12 +58,20 @@ async function writeUsersStore(store: UsersStore): Promise<void> {
 
 // ── Password hashing ──────────────────────────────────────────────────────
 
+const BCRYPT_ROUNDS = 10; // 10 rounds ≈ 100ms (vs 12 rounds ≈ 450ms). Still secure per OWASP.
+
 export function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-export function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
+}
+
+/** Check if a hash was made with older (more expensive) rounds and needs rehash */
+export function needsRehash(hash: string): boolean {
+  const rounds = bcrypt.getRounds(hash);
+  return rounds > BCRYPT_ROUNDS;
 }
 
 // ── Cookie-based session (for server components & API routes) ─────────────
@@ -138,6 +146,15 @@ export async function updatePassword(userId: string, newPassword: string) {
   if (!user) throw new Error("User not found");
 
   user.password_hash = await hashPassword(newPassword);
+  await writeUsersStore(store);
+}
+
+/** Update just the hash (used for background rehash on login) */
+export async function updatePasswordHash(userId: string, newHash: string) {
+  const store = await readUsersStore();
+  const user = store.users.find(u => u.id === userId);
+  if (!user) return;
+  user.password_hash = newHash;
   await writeUsersStore(store);
 }
 

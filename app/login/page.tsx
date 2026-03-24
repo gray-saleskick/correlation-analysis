@@ -25,8 +25,10 @@ function LoginForm() {
       });
       const data = await res.json();
       if (data.success) {
-        router.push(from);
-        router.refresh();
+        // Use window.location for a clean navigation with the new cookie.
+        // router.push + router.refresh causes a double-render.
+        window.location.href = from;
+        return;
       } else {
         setError(data.error || "Login failed");
       }

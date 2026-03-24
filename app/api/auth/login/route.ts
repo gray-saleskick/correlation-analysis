@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserByEmail, verifyPassword, signToken, buildSessionCookie } from "@/lib/auth";
+import { getUserByEmail, verifyPassword, needsRehash, hashPassword, signToken, buildSessionCookie, updatePasswordHash } from "@/lib/auth";
+
+export const maxDuration = 10;
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,6 +25,14 @@ export async function POST(req: NextRequest) {
     const token = await signToken({ userId: user.id, email: user.email });
     const res = NextResponse.json({ success: true, email: user.email, name: user.name });
     res.headers.set("Set-Cookie", buildSessionCookie(token));
+
+    // Rehash in background if stored hash uses more expensive rounds
+    if (needsRehash(user.password_hash)) {
+      hashPassword(password).then(newHash =>
+        updatePasswordHash(user.id, newHash).catch(() => {})
+      );
+    }
+
     return res;
   } catch (err) {
     console.error("Login error:", err);
