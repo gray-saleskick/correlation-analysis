@@ -112,7 +112,7 @@ export function autoDetectTarget(
   // Known skip columns
   if (SKIP_TARGETS.includes(lower) || SKIP_TARGETS.includes(n)) return "skip";
 
-  if (n === "submissionid" || lower === "submission id") return "submission_id";
+  if (n === "submissionid" || lower === "submission id") return "skip";
   if (n === "addedat" || lower === "added at") return "submitted_at";
 
   if (lower === "final grade" || lower === "gradingdata.finalgrade") return "grade.final";
@@ -123,10 +123,10 @@ export function autoDetectTarget(
     lower === "gradingdata.financialgradingresult.resultinggrade"
   )
     return "grade.financial";
-  if (lower === "was disqualified") return "grade.disqualified";
-  if (lower === "was spam") return "grade.spam";
+  if (lower === "was disqualified") return "skip";
+  if (lower === "was spam") return "skip";
   if (lower === "grade message/details" || lower === "gradingdata.details")
-    return "grade.details";
+    return "skip";
 
   if (lower === "financialdata.data.creditscore") return "financial.credit_score";
   if (lower === "financialdata.data.estimatedincome")
