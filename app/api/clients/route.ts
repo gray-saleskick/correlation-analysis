@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listClients, createClient } from "@/lib/store";
+import { listClients, createClient } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 10;

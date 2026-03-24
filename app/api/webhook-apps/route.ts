@@ -13,13 +13,12 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    // Only fetch the fields we need via JSONB projection
-    const { data, error } = await supabase
-      .from("clients")
-      .select("client_id, profile->clientId, profile->clientName, profile->applications")
-      .neq("client_id", "__users__");
+    // Query relational tables directly
+    const { data: webhookConfigs, error: wcError } = await supabase
+      .from("webhook_configs")
+      .select("application_id, source, last_received_at, enabled, applications!inner(id, title, client_id, clients!inner(client_id, client_name))");
 
-    if (error || !data) {
+    if (wcError || !webhookConfigs) {
       return NextResponse.json({ apps: [] });
     }
 
@@ -33,29 +32,27 @@ export async function GET() {
       pendingCount: number;
     }[] = [];
 
-    for (const row of data as Record<string, unknown>[]) {
-      const clientId = row.clientId as string;
-      const clientName = row.clientName as string;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const applications = row.applications as any[] | null;
-      if (!applications) continue;
+    // Get pending counts for each application
+    for (const wc of webhookConfigs as Record<string, unknown>[]) {
+      const application = wc.applications as Record<string, unknown>;
+      const client = application.clients as Record<string, unknown>;
 
-      for (const app of applications) {
-        if (app.webhook_config) {
-          apps.push({
-            clientId,
-            clientName,
-            appId: app.id,
-            appTitle: app.title,
-            source: app.webhook_config.source,
-            lastReceived: app.webhook_config.last_received_at,
-            pendingCount: (app.pending_webhook_submissions ?? []).filter(
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (p: any) => p.status === "pending"
-            ).length,
-          });
-        }
-      }
+      // Count pending webhook submissions
+      const { count: pendingCount } = await supabase
+        .from("pending_webhook_submissions")
+        .select("*", { count: "exact", head: true })
+        .eq("application_id", wc.application_id as string)
+        .eq("status", "pending");
+
+      apps.push({
+        clientId: client.client_id as string,
+        clientName: client.client_name as string,
+        appId: application.id as string,
+        appTitle: application.title as string,
+        source: wc.source as string,
+        lastReceived: (wc.last_received_at as string) ?? undefined,
+        pendingCount: pendingCount ?? 0,
+      });
     }
 
     return NextResponse.json({ apps });

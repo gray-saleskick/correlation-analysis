@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findApplicationByWebhookToken, writeProfile } from "@/lib/store";
+import {
+  findAppByWebhookToken,
+  updateApplicationFields,
+  upsertWebhookConfig,
+  insertPendingWebhook,
+  bulkUpsertSubmissions,
+  replaceCallResults,
+  replaceFinancialRecords,
+  replaceQuestions,
+  insertLoadHistory,
+} from "@/lib/db";
 
 export const maxDuration = 15;
 import {
@@ -25,13 +35,12 @@ export async function POST(
     const { token } = await params;
 
     // Look up webhook by token
-    const match = await findApplicationByWebhookToken(token);
+    const match = await findAppByWebhookToken(token);
     if (!match) {
       return NextResponse.json({ error: "Invalid webhook token" }, { status: 404 });
     }
 
-    const { profile, appIndex } = match;
-    const app = profile.applications[appIndex];
+    const { clientId, appId, app } = match;
     const config = app.webhook_config;
 
     if (!config || !config.enabled) {
@@ -91,21 +100,11 @@ export async function POST(
             : "New fields detected — mapping review required",
       };
 
-      if (!app.pending_webhook_submissions) {
-        app.pending_webhook_submissions = [];
-      }
-      app.pending_webhook_submissions.push(pending);
-
-      // Cap pending submissions at 50 (keep most recent)
-      if (app.pending_webhook_submissions.length > 50) {
-        app.pending_webhook_submissions = app.pending_webhook_submissions.slice(-50);
-      }
+      await insertPendingWebhook(appId, pending);
 
       // Always update signature so subsequent identical payloads aren't re-flagged
       config.last_field_signature = cumulativeSignature;
-
-      profile.applications[appIndex] = app;
-      await writeProfile(profile.clientId, profile);
+      await upsertWebhookConfig(appId, config);
 
       return NextResponse.json(
         {
@@ -148,8 +147,35 @@ export async function POST(
     updatedApp.webhook_config = config;
     config.last_field_signature = cumulativeSignature;
 
-    profile.applications[appIndex] = updatedApp;
-    await writeProfile(profile.clientId, profile);
+    // Write back using relational functions
+    await updateApplicationFields(appId, {
+      title: updatedApp.title,
+    });
+
+    if (updatedApp.submissions) {
+      await bulkUpsertSubmissions(appId, updatedApp.submissions);
+    }
+    if (updatedApp.financial_records) {
+      await replaceFinancialRecords(appId, updatedApp.financial_records);
+    }
+    if (updatedApp.call_results) {
+      await replaceCallResults(appId, updatedApp.call_results);
+    }
+    if (updatedApp.questions) {
+      await replaceQuestions(appId, updatedApp.questions);
+    }
+    await upsertWebhookConfig(appId, config);
+
+    // Write load history entries
+    if (updatedApp.load_history) {
+      for (const entry of updatedApp.load_history) {
+        try {
+          await insertLoadHistory(appId, entry);
+        } catch {
+          // Ignore duplicates
+        }
+      }
+    }
 
     return NextResponse.json({
       status: "processed",
@@ -169,7 +195,7 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params;
-  const match = await findApplicationByWebhookToken(token);
+  const match = await findAppByWebhookToken(token);
 
   if (!match) {
     return NextResponse.json({ error: "Invalid webhook token" }, { status: 404 });

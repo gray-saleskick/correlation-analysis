@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readProfile, writeProfile } from "@/lib/store";
+import {
+  readApplicationFull,
+  updateApplicationFields,
+  replaceQuestions,
+  bulkUpsertSubmissions,
+  insertLoadHistory,
+} from "@/lib/db";
 import type { Application, ApplicationQuestion, AppSubmission, AppSubmissionAnswer } from "@/lib/types";
 import { captureDataSnapshot, addLoadHistoryEntry } from "@/lib/loadHistory";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-// Maps Typeform field types → our TypeformQuestionType
+// Maps Typeform field types -> our TypeformQuestionType
 const TYPE_MAP: Record<string, string> = {
   short_text: "short_text",
   long_text: "long_text",
@@ -75,7 +81,7 @@ export async function POST(
     return NextResponse.json({ success: false, error: "pat and form_id are required" }, { status: 400 });
   }
 
-  // ── Fetch form definition ────────────────────────────────────────────────────
+  // -- Fetch form definition --
   let formData: {
     id: string;
     title?: string;
@@ -112,7 +118,7 @@ export async function POST(
     );
   }
 
-  // ── Map questions ────────────────────────────────────────────────────────────
+  // -- Map questions --
   const questions: ApplicationQuestion[] = (formData.fields ?? []).map((field, i) => ({
     id: field.id,
     ref: field.ref,
@@ -124,7 +130,7 @@ export async function POST(
     order: i,
   }));
 
-  // ── Fetch responses ──────────────────────────────────────────────────────────
+  // -- Fetch responses --
   let responseItems: Array<{
     response_id: string;
     submitted_at: string;
@@ -142,13 +148,13 @@ export async function POST(
       responseItems = respData.items ?? [];
     }
   } catch {
-    // Responses fetch failed — still proceed with just questions
+    // Responses fetch failed -- still proceed with just questions
   }
 
-  // Build field id → question lookup
+  // Build field id -> question lookup
   const fieldMap = new Map<string, ApplicationQuestion>(questions.map((q) => [q.id, q]));
 
-  // ── Map submissions ──────────────────────────────────────────────────────────
+  // -- Map submissions --
   const submissions: AppSubmission[] = responseItems.map((item) => {
     const answers: AppSubmissionAnswer[] = [];
     let email: string | undefined = item.hidden?.email?.toLowerCase();
@@ -176,18 +182,11 @@ export async function POST(
     };
   });
 
-  // ── Read + update profile ────────────────────────────────────────────────────
-  const profile = await readProfile(clientId);
-  if (!profile) {
-    return NextResponse.json({ success: false, error: "Client not found" }, { status: 404 });
-  }
-
-  const idx = profile.applications.findIndex((a) => a.id === appId);
-  if (idx < 0) {
+  // -- Read existing app data --
+  const existing = await readApplicationFull(appId);
+  if (!existing) {
     return NextResponse.json({ success: false, error: "Application not found" }, { status: 404 });
   }
-
-  const existing = profile.applications[idx];
 
   // Capture snapshot before merge for load history
   const preSnapshot = captureDataSnapshot(existing);
@@ -196,27 +195,51 @@ export async function POST(
   const existingIds = new Set((existing.submissions ?? []).map((s) => s.id));
   const newSubs = submissions.filter((s) => !existingIds.has(s.id));
 
-  let updated: Application = {
-    ...existing,
+  const mergedSubmissions = [...(existing.submissions ?? []), ...newSubs];
+
+  // Write scalar fields
+  await updateApplicationFields(appId, {
     typeform_pat: pat,
     typeform_form_id: form_id,
-    questions,
-    submissions: [...(existing.submissions ?? []), ...newSubs],
-  };
+  });
 
-  // Add load history entry
+  // Write questions
+  await replaceQuestions(appId, questions);
+
+  // Write submissions
+  if (mergedSubmissions.length > 0) {
+    await bulkUpsertSubmissions(appId, mergedSubmissions);
+  }
+
+  // Add load history entry if new submissions were added
   if (newSubs.length > 0) {
-    updated = addLoadHistoryEntry(
-      updated,
+    let tempApp: Application = {
+      ...existing,
+      typeform_pat: pat,
+      typeform_form_id: form_id,
+      questions,
+      submissions: mergedSubmissions,
+    };
+    tempApp = addLoadHistoryEntry(
+      tempApp,
       "typeform-sync",
       `Synced ${newSubs.length} submissions from Typeform`,
       newSubs.length,
       preSnapshot
     );
+    // Write new load history entries
+    if (tempApp.load_history) {
+      const existingHistoryIds = new Set((existing.load_history ?? []).map((e) => e.id));
+      for (const entry of tempApp.load_history) {
+        if (!existingHistoryIds.has(entry.id)) {
+          await insertLoadHistory(appId, entry);
+        }
+      }
+    }
   }
 
-  profile.applications[idx] = updated;
-  await writeProfile(clientId, profile);
+  // Re-read the full app to return it
+  const updated = await readApplicationFull(appId);
 
   return NextResponse.json({
     success: true,

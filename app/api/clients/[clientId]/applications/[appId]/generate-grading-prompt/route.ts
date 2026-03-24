@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readProfile } from "@/lib/store";
+import { readApplicationFull } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 30;
@@ -187,18 +187,15 @@ export async function POST(
 
     // Collect submission examples
     let examplesContext = "No submission data available.";
-    const profile = await readProfile(clientId);
-    if (profile) {
-      const app = profile.applications.find((a) => a.id === appId);
-      if (app?.submissions?.length) {
-        const { answers, gradedAnswers } = collectAnswersForQuestion(
-          questionId ?? "",
-          questionRef,
-          questionTitle,
-          app.submissions
-        );
-        examplesContext = buildExamplesContext(gradedAnswers, answers);
-      }
+    const app = await readApplicationFull(appId);
+    if (app?.submissions?.length) {
+      const { answers, gradedAnswers } = collectAnswersForQuestion(
+        questionId ?? "",
+        questionRef,
+        questionTitle,
+        app.submissions
+      );
+      examplesContext = buildExamplesContext(gradedAnswers, answers);
     }
 
     // Build user message

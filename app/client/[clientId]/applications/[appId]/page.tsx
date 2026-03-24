@@ -1,13 +1,14 @@
 import { cache } from "react";
 import { notFound } from "next/navigation";
-import { readProfile } from "@/lib/store";
+import { readClient, readApplicationFull } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import ApplicationDetail from "./ApplicationDetail";
 
 export const dynamic = "force-dynamic";
 
-// Deduplicate readProfile calls within a single request (Page + generateMetadata)
-const getCachedProfile = cache((clientId: string) => readProfile(clientId));
+// Deduplicate readApplicationFull calls within a single request (Page + generateMetadata)
+const getCachedApp = cache((appId: string) => readApplicationFull(appId));
+const getCachedClient = cache((clientId: string) => readClient(clientId));
 
 interface PageProps {
   params: Promise<{ clientId: string; appId: string }>;
@@ -15,20 +16,18 @@ interface PageProps {
 
 export default async function ApplicationDetailPage({ params }: PageProps) {
   const { clientId, appId } = await params;
-  const [profile, session] = await Promise.all([
-    getCachedProfile(clientId),
+  const [client, app, session] = await Promise.all([
+    getCachedClient(clientId),
+    getCachedApp(appId),
     getSession(),
   ]);
-  if (!profile) notFound();
-
-  const app = profile.applications.find((a) => a.id === appId);
-  if (!app) notFound();
+  if (!client || !app) notFound();
 
   return (
     <ApplicationDetail
       clientId={clientId}
-      clientName={profile.clientName}
-      companyDescription={profile.company_description ?? ""}
+      clientName={client.clientName}
+      companyDescription={client.company_description ?? ""}
       initialApp={app}
       userEmail={session?.email}
     />
@@ -36,8 +35,7 @@ export default async function ApplicationDetailPage({ params }: PageProps) {
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ clientId: string; appId: string }> }) {
-  const { clientId, appId } = await params;
-  const profile = await getCachedProfile(clientId);
-  const app = profile?.applications.find((a) => a.id === appId);
+  const { appId } = await params;
+  const app = await getCachedApp(appId);
   return { title: app ? `${app.title} — Correlation Analysis` : "Application — Correlation Analysis" };
 }

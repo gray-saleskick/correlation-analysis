@@ -1,8 +1,8 @@
-import { listClients, getAggregateStats } from "@/lib/store";
+import { listClients, getAggregateStats } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import HomeClient from "./HomeClient";
 
-export const revalidate = 30; // ISR: cache for 30 seconds
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const [clients, stats, session] = await Promise.all([

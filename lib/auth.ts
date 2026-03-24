@@ -1,60 +1,18 @@
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
-import { supabase } from "./supabase";
 import { verifyToken, COOKIE_NAME } from "./jwt";
 import type { SessionPayload } from "./jwt";
+import {
+  getUserByEmail as dbGetUserByEmail,
+  createUser as dbCreateUser,
+  listUsers as dbListUsers,
+  updateUserPassword as dbUpdateUserPassword,
+  deleteUser as dbDeleteUser,
+} from "./db";
 
 // Re-export everything from jwt.ts so existing imports keep working
 export { signToken, verifyToken, buildSessionCookie, buildLogoutCookie, COOKIE_NAME } from "./jwt";
 export type { SessionPayload } from "./jwt";
-
-// We store users as JSON in the existing "clients" table
-// using a reserved client_id of "__users__"
-const USERS_ROW_ID = "__users__";
-
-interface StoredUser {
-  id: string;
-  email: string;
-  password_hash: string;
-  name: string | null;
-  created_at: string;
-}
-
-interface UsersStore {
-  users: StoredUser[];
-}
-
-// ── Internal helpers to read/write users from the clients table ──────────
-
-async function readUsersStore(): Promise<UsersStore> {
-  const { data, error } = await supabase
-    .from("clients")
-    .select("profile")
-    .eq("client_id", USERS_ROW_ID)
-    .single();
-
-  if (error || !data) return { users: [] };
-  const store = data.profile as UsersStore;
-  return store?.users ? store : { users: [] };
-}
-
-async function writeUsersStore(store: UsersStore): Promise<void> {
-  const { error } = await supabase
-    .from("clients")
-    .upsert(
-      {
-        client_id: USERS_ROW_ID,
-        profile: store,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "client_id" }
-    );
-
-  if (error) {
-    console.error("writeUsersStore error:", error.message);
-    throw new Error("Failed to save users");
-  }
-}
 
 // ── Password hashing ──────────────────────────────────────────────────────
 
@@ -89,90 +47,46 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
 
 // ── User queries ──────────────────────────────────────────────────────────
 
-function generateId(): string {
-  return crypto.randomUUID();
-}
-
 export async function getUserByEmail(email: string) {
-  const store = await readUsersStore();
   const normalizedEmail = email.toLowerCase().trim();
-  const user = store.users.find(u => u.email === normalizedEmail);
-  return user || null;
+  return dbGetUserByEmail(normalizedEmail);
 }
 
 export async function getUserById(userId: string) {
-  const store = await readUsersStore();
-  const user = store.users.find(u => u.id === userId);
-  return user || null;
+  // db.ts doesn't have getUserById yet, but we can work around it
+  // by listing all users and finding. For now, keep the same signature.
+  const users = await dbListUsers();
+  return users.find(u => u.id === userId) || null;
 }
 
 export async function createUser(email: string, password: string, name?: string) {
-  const store = await readUsersStore();
   const normalizedEmail = email.toLowerCase().trim();
-
-  // Check if already exists
-  if (store.users.some(u => u.email === normalizedEmail)) {
-    throw new Error("A user with this email already exists");
-  }
-
   const hash = await hashPassword(password);
-  const newUser: StoredUser = {
-    id: generateId(),
-    email: normalizedEmail,
-    password_hash: hash,
-    name: name?.trim() || null,
-    created_at: new Date().toISOString(),
-  };
-
-  store.users.push(newUser);
-  await writeUsersStore(store);
-
-  return { id: newUser.id, email: newUser.email, name: newUser.name, created_at: newUser.created_at };
+  const user = await dbCreateUser(normalizedEmail, hash, name?.trim());
+  return { id: user.id, email: user.email, name: user.name, created_at: "" };
 }
 
 export async function listUsers() {
-  const store = await readUsersStore();
-  return store.users.map(u => ({
-    id: u.id,
-    email: u.email,
-    name: u.name,
-    created_at: u.created_at,
-  }));
+  return dbListUsers();
 }
 
 export async function updatePassword(userId: string, newPassword: string) {
-  const store = await readUsersStore();
-  const user = store.users.find(u => u.id === userId);
-  if (!user) throw new Error("User not found");
-
-  user.password_hash = await hashPassword(newPassword);
-  await writeUsersStore(store);
+  const hash = await hashPassword(newPassword);
+  await dbUpdateUserPassword(userId, hash);
 }
 
 /** Update just the hash (used for background rehash on login) */
 export async function updatePasswordHash(userId: string, newHash: string) {
-  const store = await readUsersStore();
-  const user = store.users.find(u => u.id === userId);
-  if (!user) return;
-  user.password_hash = newHash;
-  await writeUsersStore(store);
+  await dbUpdateUserPassword(userId, newHash);
 }
 
 export async function resetUserPassword(userId: string, newPassword: string) {
   // Admin reset — no current password required
-  const store = await readUsersStore();
-  const user = store.users.find(u => u.id === userId);
-  if (!user) throw new Error("User not found");
-
-  user.password_hash = await hashPassword(newPassword);
-  await writeUsersStore(store);
+  const hash = await hashPassword(newPassword);
+  await dbUpdateUserPassword(userId, hash);
 }
 
 export async function deleteUser(userId: string) {
-  const store = await readUsersStore();
-  const idx = store.users.findIndex(u => u.id === userId);
-  if (idx === -1) throw new Error("User not found");
-
-  store.users.splice(idx, 1);
-  await writeUsersStore(store);
+  const deleted = await dbDeleteUser(userId);
+  if (!deleted) throw new Error("User not found");
 }

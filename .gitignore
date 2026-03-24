@@ -4,3 +4,6 @@ node_modules/
 /clients/
 .DS_Store
 tsconfig.tsbuildinfo
+
+# Local Netlify folder
+.netlify

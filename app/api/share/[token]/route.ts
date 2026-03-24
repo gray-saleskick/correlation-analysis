@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import type { ClientProfile } from "@/lib/types";
+import { readApplicationFull, readClient } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 10;
@@ -12,13 +12,12 @@ export async function GET(
   const { token } = await params;
 
   try {
-    // Use JSONB containment to find the specific client with this share token
-    // instead of loading ALL profiles and searching in JS
+    // Query applications table directly for the share token
     const { data, error } = await supabase
-      .from("clients")
-      .select("client_id, profile")
-      .neq("client_id", "__users__")
-      .contains("profile", { applications: [{ share_token: token }] })
+      .from("applications")
+      .select("id, client_id, share_enabled")
+      .eq("share_token", token)
+      .eq("share_enabled", true)
       .maybeSingle();
 
     if (error) {
@@ -30,19 +29,19 @@ export async function GET(
       return NextResponse.json({ error: "Share link not found or disabled" }, { status: 404 });
     }
 
-    const profile = data.profile as ClientProfile;
-    const app = profile.applications.find(
-      (a) => a.share_token === token && a.share_enabled
-    );
-
+    // Get full application data
+    const app = await readApplicationFull(data.id);
     if (!app) {
       return NextResponse.json({ error: "Share link not found or disabled" }, { status: 404 });
     }
 
+    // Get client info for the company description
+    const client = await readClient(data.client_id);
+
     return NextResponse.json({
       success: true,
-      clientName: profile.clientName,
-      companyDescription: profile.company_description,
+      clientName: client?.clientName ?? "",
+      companyDescription: client?.company_description,
       app: {
         id: app.id,
         title: app.title,

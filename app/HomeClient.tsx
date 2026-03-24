@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import type { AggregateStats } from "@/lib/store";
+import type { AggregateStats } from "@/lib/db";
 import { hasWebhookAccess } from "@/lib/featureFlags";
 
 interface ClientSummary {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readProfile } from "@/lib/store";
+import { readApplicationFull, readClient } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 60;
@@ -442,12 +442,10 @@ export async function POST(
       );
     }
 
-    const profile = await readProfile(clientId);
-    if (!profile) {
-      return NextResponse.json({ success: false, error: "Client not found" }, { status: 404 });
-    }
-
-    const app = profile.applications.find((a) => a.id === appId);
+    const [client, app] = await Promise.all([
+      readClient(clientId),
+      readApplicationFull(appId),
+    ]);
     if (!app) {
       return NextResponse.json({ success: false, error: "Application not found" }, { status: 404 });
     }
@@ -488,8 +486,8 @@ export async function POST(
     const payload: string[] = [];
 
     // Company context
-    if (profile.company_description?.trim()) {
-      payload.push(`## Company Description\n${profile.company_description.trim()}\n`);
+    if (client?.company_description?.trim()) {
+      payload.push(`## Company Description\n${client.company_description.trim()}\n`);
     }
 
     // Client notes
