@@ -13,9 +13,11 @@ export function uid(): string {
 export async function listClients(): Promise<
   { clientId: string; clientName: string; created_at: string; appCount: number }[]
 > {
+  // Use ->> (text extraction) for scalar fields — Postgres returns lightweight
+  // text values instead of serializing the entire multi-MB profile JSONB.
   const { data, error } = await supabase
     .from("clients")
-    .select("client_id, profile")
+    .select("client_id, profile->>clientName, profile->>created_at, profile->>clientId")
     .neq("client_id", "__users__")
     .order("created_at", { ascending: true });
 
@@ -25,15 +27,12 @@ export async function listClients(): Promise<
   }
 
   return (data ?? [])
-    .map((row) => {
-      const profile = row.profile as ClientProfile;
-      return {
-        clientId: profile.clientId,
-        clientName: profile.clientName,
-        created_at: profile.created_at,
-        appCount: profile.applications.length,
-      };
-    })
+    .map((row: Record<string, unknown>) => ({
+      clientId: (row.clientId as string) ?? (row.client_id as string) ?? "",
+      clientName: (row.clientName as string) ?? "",
+      created_at: (row.created_at as string) ?? "",
+      appCount: 0, // Requires RPC to get cheaply; full profile is too large to serialize
+    }))
     .sort((a, b) => a.clientName.localeCompare(b.clientName));
 }
 
@@ -202,39 +201,19 @@ export async function getAggregateStats(): Promise<AggregateStats> {
     };
   }
 
-  // Fallback: JS-side computation (used if RPC not yet deployed)
-  console.warn("get_aggregate_stats RPC not available, falling back to JS computation");
-  const { data, error } = await supabase
+  // Fallback: just count clients (the only cheap query).
+  // Full profile loading times out on large datasets — deploy the RPC for full stats.
+  console.warn("get_aggregate_stats RPC not available, returning client count only");
+  const { count, error } = await supabase
     .from("clients")
-    .select("client_id, profile")
+    .select("client_id", { count: "exact", head: true })
     .neq("client_id", "__users__");
 
-  if (error || !data) return empty;
-
-  const stats = { ...empty };
-  for (const row of data) {
-    stats.totalClients++;
-    const apps = (row.profile as ClientProfile)?.applications;
-    if (!apps) continue;
-    for (const app of apps) {
-      stats.totalApplications++;
-      stats.totalSubmissions += app.submissions?.length ?? 0;
-      stats.totalFinancialRecords += app.financial_records?.length ?? 0;
-      stats.totalQuestions += app.questions?.length ?? 0;
-      if (app.audit_analysis) stats.totalAuditsGenerated++;
-      if (app.grading_audit_analysis) stats.totalGradingAuditsGenerated++;
-
-      const callResults = app.call_results ?? [];
-      stats.totalCallResults += callResults.length;
-      for (const cr of callResults) {
-        if (cr.booked) stats.totalBookings++;
-        if (cr.showed) stats.totalShows++;
-        if (cr.closed) stats.totalCloses++;
-      }
-    }
+  if (!error && count != null) {
+    empty.totalClients = count;
   }
 
-  return stats;
+  return empty;
 }
 
 export async function findApplicationByWebhookToken(
