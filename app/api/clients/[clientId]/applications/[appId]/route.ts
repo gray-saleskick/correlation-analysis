@@ -3,6 +3,7 @@ import { readProfile, writeProfile } from "@/lib/store";
 import type { Application } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 15;
 
 // Maximum request body size (10MB) for application data
 const MAX_BODY_SIZE = 10 * 1024 * 1024;

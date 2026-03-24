@@ -4,6 +4,7 @@ import type { Application, ApplicationQuestion, AppSubmission, AppSubmissionAnsw
 import { captureDataSnapshot, addLoadHistoryEntry } from "@/lib/loadHistory";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 // Maps Typeform field types → our TypeformQuestionType
 const TYPE_MAP: Record<string, string> = {

@@ -13,9 +13,11 @@ export function uid(): string {
 export async function listClients(): Promise<
   { clientId: string; clientName: string; created_at: string; appCount: number }[]
 > {
+  // Only fetch the 3 fields we need via JSONB projection — avoids downloading
+  // full nested submissions/financial data for every client.
   const { data, error } = await supabase
     .from("clients")
-    .select("client_id, profile")
+    .select("client_id, profile->clientName, profile->created_at, profile->applications")
     .neq("client_id", "__users__")
     .order("created_at", { ascending: true });
 
@@ -25,15 +27,12 @@ export async function listClients(): Promise<
   }
 
   return (data ?? [])
-    .map((row) => {
-      const profile = row.profile as ClientProfile;
-      return {
-        clientId: profile.clientId,
-        clientName: profile.clientName,
-        created_at: profile.created_at,
-        appCount: profile.applications.length,
-      };
-    })
+    .map((row: Record<string, unknown>) => ({
+      clientId: row.client_id as string,
+      clientName: (row.clientName as string) ?? "",
+      created_at: (row.created_at as string) ?? "",
+      appCount: Array.isArray(row.applications) ? row.applications.length : 0,
+    }))
     .sort((a, b) => a.clientName.localeCompare(b.clientName));
 }
 

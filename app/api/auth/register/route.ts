@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, createUser, getUserByEmail } from "@/lib/auth";
 
+export const maxDuration = 10;
+
 export async function POST(req: NextRequest) {
   try {
     // Only logged-in users can create accounts

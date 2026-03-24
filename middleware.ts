@@ -9,35 +9,31 @@ const PUBLIC_PATHS = [
   "/api/webhook/",
 ];
 
-const STATIC_PREFIXES = [
-  "/_next/",
-  "/favicon.ico",
-  "/logo.png",
-];
-
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Always allow static assets
-  if (STATIC_PREFIXES.some(p => pathname.startsWith(p))) {
-    return NextResponse.next();
-  }
-
-  // Always allow public paths
+  // Allow public paths without auth
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
   // Check session cookie
   const token = req.cookies.get("sk_session")?.value;
-  const session = token ? await verifyToken(token) : null;
-
-  if (!session) {
-    // API routes get 401
+  if (!token) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    // Pages redirect to login
+    const loginUrl = req.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.searchParams.set("from", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const session = await verifyToken(token);
+  if (!session) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.searchParams.set("from", pathname);
@@ -49,7 +45,7 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    // Match everything except static files
-    "/((?!_next/static|_next/image|favicon.ico).*)",
+    // Skip all static files, images, and public assets — middleware doesn't even run
+    "/((?!_next/static|_next/image|favicon\\.ico|logo\\.svg|logo\\.png|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico)$).*)",
   ],
 };

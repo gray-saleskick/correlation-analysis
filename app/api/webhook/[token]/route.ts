@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findApplicationByWebhookToken, writeProfile } from "@/lib/store";
+
+export const maxDuration = 15;
 import {
   flattenPayload,
   computeFieldSignature,

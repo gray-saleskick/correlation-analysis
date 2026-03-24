@@ -3,6 +3,7 @@ import { readProfile, writeProfile, uid } from "@/lib/store";
 import type { Application } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 10;
 
 export async function POST(
   req: NextRequest,

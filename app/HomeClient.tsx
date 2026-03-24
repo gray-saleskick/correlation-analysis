@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { AggregateStats } from "@/lib/store";
 import { hasWebhookAccess } from "@/lib/featureFlags";
@@ -189,9 +189,10 @@ export default function HomeClient({ initialClients, stats, userEmail }: { initi
     if (settingsOpen && settingsTab === "accounts") loadUsers();
   }, [settingsOpen, settingsTab]);
 
-  const filtered = search.trim()
-    ? clients.filter((c) => c.clientName.toLowerCase().includes(search.trim().toLowerCase()))
-    : clients;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? clients.filter((c) => c.clientName.toLowerCase().includes(q)) : clients;
+  }, [clients, search]);
 
   const settingsFiltered = settingsSearch.trim()
     ? clients.filter((c) => c.clientName.toLowerCase().includes(settingsSearch.trim().toLowerCase()))

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, getUserByEmail, verifyPassword, updatePassword } from "@/lib/auth";
 
+export const maxDuration = 10;
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
