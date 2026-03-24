@@ -296,6 +296,19 @@ function QuestionCard({
                       className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                       placeholder="Answer choice…"
                     />
+                    <input
+                      type="text"
+                      value={choice.group ?? ""}
+                      onChange={(e) => {
+                        const updated = [...(question.choices ?? [])];
+                        updated[ci] = { ...updated[ci], group: e.target.value || undefined };
+                        onUpdate({ choices: updated });
+                      }}
+                      list={`groups-${question.id}`}
+                      className="w-36 shrink-0 bg-white/[0.03] border border-white/[0.06] rounded-lg px-2 py-1.5 text-xs text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder:text-slate-600"
+                      placeholder="Map to…"
+                      title="Group label for correlation analysis"
+                    />
                     <button
                       onClick={() => {
                         const updated = (question.choices ?? []).filter((_, i) => i !== ci);
@@ -310,6 +323,12 @@ function QuestionCard({
                     </button>
                   </div>
                 ))}
+                {/* Datalist for autocomplete of existing group names */}
+                <datalist id={`groups-${question.id}`}>
+                  {Array.from(new Set((question.choices ?? []).map(c => c.group).filter(Boolean))).map(g => (
+                    <option key={g} value={g!} />
+                  ))}
+                </datalist>
                 <button
                   onClick={() => {
                     const updated = [...(question.choices ?? []), { id: uid(), label: "" }];

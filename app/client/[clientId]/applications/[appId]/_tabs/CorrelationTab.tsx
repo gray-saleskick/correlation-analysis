@@ -344,7 +344,7 @@ Questions: ${(app.questions ?? []).length}`);
 
     // Helper: given a raw submission value and defined choices, resolve to matched choice labels.
     // For multi-select questions, a raw value like "Choice A, Choice B" is matched against known labels.
-    function resolveAnswers(rawVal: string, choices: { id: string; label: string }[] | undefined, isMultiSelect: boolean): string[] {
+    function resolveAnswers(rawVal: string, choices: { id: string; label: string; group?: string }[] | undefined, isMultiSelect: boolean): string[] {
       if (!choices || choices.length === 0) {
         // No defined choices — if multi-select, try comma-splitting
         if (isMultiSelect && rawVal.includes(",")) {
@@ -355,8 +355,9 @@ Questions: ${(app.questions ?? []).length}`);
       }
 
       // Try exact match first (case-insensitive)
+      // If the choice has a group, use the group name instead of the label
       const exactMatch = choices.find(c => c.label.toLowerCase() === rawVal.toLowerCase());
-      if (exactMatch) return [exactMatch.label];
+      if (exactMatch) return [exactMatch.group || exactMatch.label];
 
       if (isMultiSelect) {
         // For multi-select: try to match the raw value against known choice labels.
@@ -369,14 +370,16 @@ Questions: ${(app.questions ?? []).length}`);
           // Check if this choice label appears in the remaining string
           const idx = remaining.toLowerCase().indexOf(c.label.toLowerCase());
           if (idx !== -1) {
-            matched.push(c.label);
+            // Use group name if set, otherwise use label
+            matched.push(c.group || c.label);
             // Remove the matched portion and surrounding delimiters
             const before = remaining.slice(0, idx);
             const after = remaining.slice(idx + c.label.length);
             remaining = (before + after).replace(/^[\s,;|]+|[\s,;|]+$/g, "").replace(/[\s,;|]{2,}/g, ", ");
           }
         }
-        if (matched.length > 0) return matched;
+        // Dedupe — multiple raw answers may map to the same group
+        if (matched.length > 0) return Array.from(new Set(matched));
       }
 
       // Choices are defined but nothing matched — exclude from correlation

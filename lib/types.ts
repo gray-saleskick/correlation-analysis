@@ -27,7 +27,7 @@ export interface ApplicationQuestion {
   title: string;
   type: TypeformQuestionType;
   required: boolean;
-  choices?: { id: string; label: string }[];
+  choices?: { id: string; label: string; group?: string }[];
   allow_multiple_selection?: boolean;
   order: number;
   grading_prompt_template?: string;
