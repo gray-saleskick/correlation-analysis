@@ -157,9 +157,12 @@ Questions: ${(app.questions ?? []).length}`);
     if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
   }, [activeChat?.messages.length, dataChatLoading]);
 
+  const [streamingNarrative, setStreamingNarrative] = useState<string | null>(null);
+
   async function generateNarrative() {
     setNarrativeGenerating(true);
     setNarrativeError(null);
+    setStreamingNarrative("");
     setShowRegenConfirm(false);
     try {
       const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/generate-narrative`, {
@@ -167,16 +170,31 @@ Questions: ${(app.questions ?? []).length}`);
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const data = await res.json();
-      if (data.success) {
-        onSave({ ...app, narrative_analysis: data.narrative, narrative_generated_at: data.generated_at });
-      } else {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Request failed" }));
         setNarrativeError(data.error || "Failed to generate analysis.");
+        setStreamingNarrative(null);
+        return;
+      }
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        setStreamingNarrative(text);
+      }
+      if (text.trim()) {
+        onSave({ ...app, narrative_analysis: text.trim(), narrative_generated_at: new Date().toISOString() });
+      } else {
+        setNarrativeError("No analysis generated. Please try again.");
       }
     } catch (err) {
       setNarrativeError(err instanceof Error ? err.message : "Network error");
     } finally {
       setNarrativeGenerating(false);
+      setStreamingNarrative(null);
     }
   }
 
@@ -1095,7 +1113,7 @@ Questions: ${(app.questions ?? []).length}`);
 
       {/* ── Lead Narrative Analysis ── */}
       <section>
-        {app.narrative_analysis ? (
+        {(app.narrative_analysis || streamingNarrative !== null) ? (
           <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-6 space-y-4">
             {/* Header */}
             <div className="flex items-center justify-between">
@@ -1147,21 +1165,13 @@ Questions: ${(app.questions ?? []).length}`);
 
             {/* Collapsible body */}
             {!narrativeCollapsed && <>
-            {/* Generating overlay */}
-            {narrativeGenerating ? (
-              <div className="space-y-3 animate-pulse">
-                {[...Array(6)].map((_, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="h-4 w-40 bg-white/[0.06] rounded" />
-                    <div className="h-3 w-full bg-white/[0.04] rounded" />
-                    <div className="h-3 w-3/4 bg-white/[0.04] rounded" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              /* Rendered markdown narrative */
+            {/* Narrative content — streams in progressively */}
+            {(() => {
+              const displayText = streamingNarrative ?? app.narrative_analysis;
+              if (!displayText) return null;
+              return (
               <div className="space-y-4">
-                {app.narrative_analysis.split(/^## /m).filter(Boolean).map((section, i) => {
+                {displayText.split(/^## /m).filter(Boolean).map((section, i) => {
                   const lines = section.split("\n");
                   const title = lines[0]?.trim();
                   const body = lines.slice(1).join("\n").trim();
@@ -1216,8 +1226,15 @@ Questions: ${(app.questions ?? []).length}`);
                     </div>
                   );
                 })}
+                {narrativeGenerating && (
+                  <div className="flex items-center gap-2 text-xs text-indigo-400 mt-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    Generating...
+                  </div>
+                )}
               </div>
-            )}
+              );
+            })()}
 
             {narrativeError && (
               <p className="text-xs text-red-400 mt-2">{narrativeError}</p>

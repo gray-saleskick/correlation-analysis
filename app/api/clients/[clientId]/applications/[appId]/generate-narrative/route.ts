@@ -160,7 +160,7 @@ function summarizeQuestions(app: Application): QuestionSummary[] {
       if (grade != null) {
         const gKey = String(Math.round(grade));
         if (!byGrade[gKey]) byGrade[gKey] = [];
-        if (byGrade[gKey].length < 15) byGrade[gKey].push(val);
+        if (byGrade[gKey].length < 5) byGrade[gKey].push(val);
       }
     }
 
@@ -173,7 +173,7 @@ function summarizeQuestions(app: Application): QuestionSummary[] {
     let sampleOpenEnded: string[] = [];
     if (isOpenEnded && allAnswers.length > 0) {
       const shuffled = [...allAnswers].sort(() => Math.random() - 0.5);
-      sampleOpenEnded = shuffled.slice(0, Math.min(50, allAnswers.length));
+      sampleOpenEnded = shuffled.slice(0, Math.min(20, allAnswers.length));
     }
 
     summaries.push({
@@ -482,31 +482,40 @@ export async function POST(
 
     const userMessage = `Analyze this lead/application data and provide your narrative breakdown:\n\n${dataPayload.join("\n")}`;
 
-    // ── Call Anthropic ──────────────────────────────────────────────────
-    const anthropic = new Anthropic({ apiKey, timeout: 55_000 });
-    const message = await anthropic.messages.create({
+    // ── Stream from Anthropic ───────────────────────────────────────────
+    const anthropic = new Anthropic({ apiKey });
+    const stream = anthropic.messages.stream({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
     });
 
-    const textBlock = message.content.find((b) => b.type === "text");
-    const narrative = textBlock?.type === "text" ? textBlock.text.trim() : "";
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (
+              event.type === "content_block_delta" &&
+              event.delta.type === "text_delta"
+            ) {
+              controller.enqueue(encoder.encode(event.delta.text));
+            }
+          }
+          controller.close();
+        } catch (err) {
+          console.error("Narrative stream error:", err);
+          controller.close();
+        }
+      },
+    });
 
-    if (!narrative) {
-      return NextResponse.json(
-        { success: false, error: "No analysis generated. Please try again." },
-        { status: 500 }
-      );
-    }
-
-    const generatedAt = new Date().toISOString();
-
-    return NextResponse.json({
-      success: true,
-      narrative,
-      generated_at: generatedAt,
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI request failed";

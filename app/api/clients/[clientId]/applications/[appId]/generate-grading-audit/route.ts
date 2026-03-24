@@ -595,29 +595,40 @@ export async function POST(
 
     const userMessage = `Audit this application's grading and scoring system. Evaluate whether the current grading rubric is correctly calibrated against actual show and close outcomes, and recommend specific scoring changes:\n\n${payload.join("\n")}`;
 
-    // ── Call Anthropic ────────────────────────────────────────────────
-    const anthropic = new Anthropic({ apiKey, timeout: 55_000 });
-    const message = await anthropic.messages.create({
+    // ── Stream from Anthropic ────────────────────────────────────────
+    const anthropic = new Anthropic({ apiKey });
+    const stream = anthropic.messages.stream({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
     });
 
-    const textBlock = message.content.find((b) => b.type === "text");
-    const audit = textBlock?.type === "text" ? textBlock.text.trim() : "";
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (
+              event.type === "content_block_delta" &&
+              event.delta.type === "text_delta"
+            ) {
+              controller.enqueue(encoder.encode(event.delta.text));
+            }
+          }
+          controller.close();
+        } catch (err) {
+          console.error("Grading audit stream error:", err);
+          controller.close();
+        }
+      },
+    });
 
-    if (!audit) {
-      return NextResponse.json(
-        { success: false, error: "No grading audit generated. Please try again." },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      audit,
-      generated_at: new Date().toISOString(),
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI request failed";

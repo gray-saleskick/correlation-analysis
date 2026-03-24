@@ -1089,34 +1089,52 @@ export default function QuestionsTab({
   const [showAuditNotes, setShowAuditNotes] = useState(false);
   const [auditNotes, setAuditNotes] = useState(app.audit_client_notes ?? "");
   const [showAuditRegenConfirm, setShowAuditRegenConfirm] = useState(false);
+  const [streamingAudit, setStreamingAudit] = useState<string | null>(null);
 
   async function generateAudit() {
     setAuditGenerating(true);
     setAuditError(null);
+    setStreamingAudit("");
     setShowAuditRegenConfirm(false);
     setShowAuditNotes(false);
+    setAuditCollapsed(false);
     try {
       const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/generate-audit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientNotes: auditNotes.trim() || undefined }),
       });
-      const data = await res.json();
-      if (data.success) {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Request failed" }));
+        setAuditError(data.error || "Failed to generate audit.");
+        setStreamingAudit(null);
+        return;
+      }
+      // Stream the response
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        setStreamingAudit(text);
+      }
+      if (text.trim()) {
         onSave({
           ...app,
-          audit_analysis: data.audit,
-          audit_generated_at: data.generated_at,
+          audit_analysis: text.trim(),
+          audit_generated_at: new Date().toISOString(),
           audit_client_notes: auditNotes.trim() || undefined,
         });
-        setAuditCollapsed(false);
       } else {
-        setAuditError(data.error || "Failed to generate audit.");
+        setAuditError("No audit generated. Please try again.");
       }
     } catch (err) {
       setAuditError(err instanceof Error ? err.message : "Network error");
     } finally {
       setAuditGenerating(false);
+      setStreamingAudit(null);
     }
   }
 
@@ -1127,34 +1145,51 @@ export default function QuestionsTab({
   const [showGradingAuditNotes, setShowGradingAuditNotes] = useState(false);
   const [gradingAuditNotes, setGradingAuditNotes] = useState(app.grading_audit_client_notes ?? "");
   const [showGradingAuditRegenConfirm, setShowGradingAuditRegenConfirm] = useState(false);
+  const [streamingGradingAudit, setStreamingGradingAudit] = useState<string | null>(null);
 
   async function generateGradingAudit() {
     setGradingAuditGenerating(true);
     setGradingAuditError(null);
+    setStreamingGradingAudit("");
     setShowGradingAuditRegenConfirm(false);
     setShowGradingAuditNotes(false);
+    setGradingAuditCollapsed(false);
     try {
       const res = await fetch(`/api/clients/${clientId}/applications/${app.id}/generate-grading-audit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientNotes: gradingAuditNotes.trim() || undefined }),
       });
-      const data = await res.json();
-      if (data.success) {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Request failed" }));
+        setGradingAuditError(data.error || "Failed to generate grading audit.");
+        setStreamingGradingAudit(null);
+        return;
+      }
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        setStreamingGradingAudit(text);
+      }
+      if (text.trim()) {
         onSave({
           ...app,
-          grading_audit_analysis: data.audit,
-          grading_audit_generated_at: data.generated_at,
+          grading_audit_analysis: text.trim(),
+          grading_audit_generated_at: new Date().toISOString(),
           grading_audit_client_notes: gradingAuditNotes.trim() || undefined,
         });
-        setGradingAuditCollapsed(false);
       } else {
-        setGradingAuditError(data.error || "Failed to generate grading audit.");
+        setGradingAuditError("No grading audit generated. Please try again.");
       }
     } catch (err) {
       setGradingAuditError(err instanceof Error ? err.message : "Network error");
     } finally {
       setGradingAuditGenerating(false);
+      setStreamingGradingAudit(null);
     }
   }
 
@@ -1427,7 +1462,7 @@ export default function QuestionsTab({
 
       {/* ── Application Audit ── */}
       {app.questions.length > 0 && (
-        app.audit_analysis ? (
+        (app.audit_analysis || streamingAudit !== null) ? (
           <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-6 space-y-4">
             {/* Audit Header */}
             <div className="flex items-center justify-between">
@@ -1479,19 +1514,12 @@ export default function QuestionsTab({
 
             {/* Collapsible audit body */}
             {!auditCollapsed && <>
-            {auditGenerating ? (
-              <div className="space-y-3 animate-pulse">
-                {[...Array(8)].map((_, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="h-4 w-40 bg-white/[0.06] rounded" />
-                    <div className="h-3 w-full bg-white/[0.04] rounded" />
-                    <div className="h-3 w-3/4 bg-white/[0.04] rounded" />
-                  </div>
-                ))}
-              </div>
-            ) : (
+            {(() => {
+              const displayText = streamingAudit ?? app.audit_analysis;
+              if (!displayText) return null;
+              return (
               <div className="space-y-4">
-                {app.audit_analysis.split(/^## /m).filter(Boolean).map((section, i) => {
+                {displayText.split(/^## /m).filter(Boolean).map((section, i) => {
                   const lines = section.split("\n");
                   const title = lines[0]?.trim();
                   const body = lines.slice(1).join("\n").trim();
@@ -1554,8 +1582,15 @@ export default function QuestionsTab({
                     </div>
                   );
                 })}
+                {auditGenerating && (
+                  <div className="flex items-center gap-2 text-xs text-indigo-400 mt-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    Generating...
+                  </div>
+                )}
               </div>
-            )}
+              );
+            })()}
 
             {auditError && (
               <p className="text-xs text-red-400 mt-2">{auditError}</p>
@@ -1619,7 +1654,7 @@ export default function QuestionsTab({
 
       {/* ── Grading Audit ── */}
       {app.questions.length > 0 && (
-        app.grading_audit_analysis ? (
+        (app.grading_audit_analysis || streamingGradingAudit !== null) ? (
           <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-6 space-y-4">
             {/* Grading Audit Header */}
             <div className="flex items-center justify-between">
@@ -1671,19 +1706,12 @@ export default function QuestionsTab({
 
             {/* Collapsible grading audit body */}
             {!gradingAuditCollapsed && <>
-            {gradingAuditGenerating ? (
-              <div className="space-y-3 animate-pulse">
-                {[...Array(8)].map((_, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="h-4 w-40 bg-white/[0.06] rounded" />
-                    <div className="h-3 w-full bg-white/[0.04] rounded" />
-                    <div className="h-3 w-3/4 bg-white/[0.04] rounded" />
-                  </div>
-                ))}
-              </div>
-            ) : (
+            {(() => {
+              const displayText = streamingGradingAudit ?? app.grading_audit_analysis;
+              if (!displayText) return null;
+              return (
               <div className="space-y-4">
-                {app.grading_audit_analysis.split(/^## /m).filter(Boolean).map((section, i) => {
+                {displayText.split(/^## /m).filter(Boolean).map((section, i) => {
                   const lines = section.split("\n");
                   const title = lines[0]?.trim();
                   const body = lines.slice(1).join("\n").trim();
@@ -1745,8 +1773,15 @@ export default function QuestionsTab({
                     </div>
                   );
                 })}
+                {gradingAuditGenerating && (
+                  <div className="flex items-center gap-2 text-xs text-emerald-400 mt-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Generating...
+                  </div>
+                )}
               </div>
-            )}
+              );
+            })()}
 
             {gradingAuditError && (
               <p className="text-xs text-red-400 mt-2">{gradingAuditError}</p>

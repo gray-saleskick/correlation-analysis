@@ -166,18 +166,18 @@ function buildQuestionAuditData(app: Application): QuestionAuditData[] {
       if (grade != null) {
         const gKey = String(Math.round(grade));
         if (!byGrade[gKey]) byGrade[gKey] = [];
-        if (byGrade[gKey].length < 10) byGrade[gKey].push(val);
+        if (byGrade[gKey].length < 5) byGrade[gKey].push(val);
       }
     }
 
     const sorted = Array.from(answerCounts.entries()).sort((a, b) => b[1] - a[1]);
-    const topAnswers = sorted.slice(0, 15).map(([answer, count]) => ({ answer, count }));
+    const topAnswers = sorted.slice(0, 10).map(([answer, count]) => ({ answer, count }));
 
     const isOpenEnded = ["short_text", "long_text"].includes(q.type);
     let sampleOpenEnded: string[] = [];
     if (isOpenEnded && allAnswers.length > 0) {
       const shuffled = [...allAnswers].sort(() => Math.random() - 0.5);
-      sampleOpenEnded = shuffled.slice(0, Math.min(40, allAnswers.length));
+      sampleOpenEnded = shuffled.slice(0, Math.min(15, allAnswers.length));
     }
 
     results.push({
@@ -403,10 +403,12 @@ export async function POST(
       );
     }
 
+    const t0 = Date.now();
     const [client, app] = await Promise.all([
       readClient(clientId),
       readApplicationCore(appId),
     ]);
+    console.log(`[audit] DB load: ${Date.now() - t0}ms`);
     if (!app) {
       return NextResponse.json({ success: false, error: "Application not found" }, { status: 404 });
     }
@@ -414,6 +416,7 @@ export async function POST(
     const submissions = app.submissions ?? [];
     const callResults = app.call_results ?? [];
     const financialRecords = app.financial_records ?? [];
+    console.log(`[audit] ${submissions.length} subs, ${app.questions.length} qs, ${callResults.length} calls, ${financialRecords.length} fin`);
 
     if (app.questions.length === 0) {
       return NextResponse.json(
@@ -500,10 +503,17 @@ export async function POST(
         }
       }
 
-      if (q.byGrade) {
-        payload.push("\nAnswers by grade level:");
-        for (const [grade, answers] of Object.entries(q.byGrade).sort(([a], [b]) => b.localeCompare(a))) {
-          payload.push(`  Grade ${grade} (${answers.length} samples):\n${answers.map((a) => `    "${a}"`).join("\n")}`);
+      if (q.byGrade && Object.keys(q.byGrade).length > 0) {
+        // Only show top and bottom grade buckets to keep payload small
+        const gradeEntries = Object.entries(q.byGrade).sort(([a], [b]) => Number(b) - Number(a));
+        const topGrades = gradeEntries.slice(0, 3);
+        const bottomGrades = gradeEntries.slice(-3).filter(([k]) => !topGrades.some(([tk]) => tk === k));
+        const selectedGrades = [...topGrades, ...bottomGrades];
+        if (selectedGrades.length > 0) {
+          payload.push("\nAnswers by grade level (top/bottom):");
+          for (const [grade, answers] of selectedGrades) {
+            payload.push(`  Grade ${grade} (${answers.length} samples):\n${answers.slice(0, 3).map((a) => `    "${a}"`).join("\n")}`);
+          }
         }
       }
 
@@ -519,29 +529,43 @@ export async function POST(
 
     const userMessage = `Audit this application form and provide your comprehensive analysis:\n\n${payload.join("\n")}`;
 
-    // ── Call Anthropic ──────────────────────────────────────────────────
-    const anthropic = new Anthropic({ apiKey, timeout: 55_000 });
-    const message = await anthropic.messages.create({
+    // ── Stream from Anthropic ───────────────────────────────────────────
+    const t1 = Date.now();
+    console.log(`[audit] Calling Anthropic stream (payload ${userMessage.length} chars)...`);
+    const anthropic = new Anthropic({ apiKey });
+    const stream = anthropic.messages.stream({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
     });
 
-    const textBlock = message.content.find((b) => b.type === "text");
-    const audit = textBlock?.type === "text" ? textBlock.text.trim() : "";
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (
+              event.type === "content_block_delta" &&
+              event.delta.type === "text_delta"
+            ) {
+              controller.enqueue(encoder.encode(event.delta.text));
+            }
+          }
+          console.log(`[audit] Anthropic stream done in ${Date.now() - t1}ms`);
+          controller.close();
+        } catch (err) {
+          console.error("Audit stream error:", err);
+          controller.close();
+        }
+      },
+    });
 
-    if (!audit) {
-      return NextResponse.json(
-        { success: false, error: "No audit generated. Please try again." },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      audit,
-      generated_at: new Date().toISOString(),
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI request failed";
