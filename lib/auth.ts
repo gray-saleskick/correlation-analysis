@@ -67,13 +67,17 @@ export function verifyPassword(password: string, hash: string): Promise<boolean>
 }
 
 // ── Cookie-based session (for server components & API routes) ─────────────
+// Wrapped with React cache() so multiple calls within the same request
+// (e.g. layout.tsx + page.tsx) only verify the JWT once.
 
-export async function getSession(): Promise<SessionPayload | null> {
+import { cache } from "react";
+
+export const getSession = cache(async (): Promise<SessionPayload | null> => {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return null;
   return verifyToken(token);
-}
+});
 
 // ── User queries ──────────────────────────────────────────────────────────
 
