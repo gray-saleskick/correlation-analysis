@@ -323,20 +323,51 @@ export async function listApplications(
 export async function readApplicationFull(
   appId: string
 ): Promise<Application | null> {
-  // 1. Fetch the application row
-  const { data: appRow, error: appError } = await supabase
-    .from("applications")
+  // 1. Fetch app row + submissions in parallel (submissions needed for answer IDs)
+  const [appRes, submissionsRes] = await Promise.all([
+    supabase.from("applications").select("*").eq("id", appId).single(),
+    supabase
+      .from("submissions")
+      .select("*")
+      .eq("application_id", appId)
+      .order("submitted_at", { ascending: true }),
+  ]);
+
+  const appRow = appRes.data;
+  if (appRes.error || !appRow) return null;
+
+  // 2. Now fetch answers (needs submission IDs) + everything else in parallel
+  const submissionIds = (submissionsRes.data ?? []).map(
+    (s: Record<string, unknown>) => s.id as string
+  );
+
+  // Build answer fetch promises (batched by 500)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const answerPromises: PromiseLike<any>[] = [];
+  if (submissionIds.length > 0) {
+    for (let i = 0; i < submissionIds.length; i += 500) {
+      answerPromises.push(
+        supabase
+          .from("submission_answers")
+          .select("submission_id,question_ref,question_title,value")
+          .in("submission_id", submissionIds.slice(i, i + 500))
+      );
+    }
+  }
+
+  // Fetch data_chats first to get IDs for filtering messages
+  const dataChatsRes = await supabase
+    .from("data_chats")
     .select("*")
-    .eq("id", appId)
-    .single();
+    .eq("application_id", appId)
+    .order("created_at", { ascending: true });
 
-  if (appError || !appRow) return null;
+  const dataChatIds = (dataChatsRes.data ?? []).map(
+    (dc: Record<string, unknown>) => dc.id as string
+  );
 
-  // 2. Parallel fetch all child tables
   const [
     questionsRes,
-    submissionsRes,
-    answersRes,
     financialRes,
     callResultsRes,
     webhookConfigRes,
@@ -347,34 +378,16 @@ export async function readApplicationFull(
     narrativeChatRes,
     auditChatRes,
     gradingAuditChatRes,
-    dataChatsRes,
     dataChatMsgsRes,
     loadHistoryRes,
     uploadMappingsRes,
+    ...answerResults
   ] = await Promise.all([
     supabase
       .from("application_questions")
       .select("*")
       .eq("application_id", appId)
       .order("sort_order", { ascending: true }),
-    supabase
-      .from("submissions")
-      .select("*")
-      .eq("application_id", appId)
-      .order("submitted_at", { ascending: true }),
-    supabase
-      .from("submission_answers")
-      .select("*")
-      .in(
-        "submission_id",
-        // We need submission IDs — use a subquery approach:
-        // First collect them after submissionsRes resolves, but since we're
-        // in Promise.all we need all sub IDs. We'll filter after.
-        // Actually, we can't reference submissionsRes here.
-        // Instead, we'll fetch ALL answers for this app's submissions
-        // by using a join approach via Supabase's filter.
-        [] // placeholder — we'll re-fetch below
-      ),
     supabase
       .from("financial_records")
       .select("*")
@@ -407,31 +420,30 @@ export async function readApplicationFull(
       .eq("application_id", appId),
     supabase
       .from("chat_messages")
-      .select("*")
+      .select("role,content")
       .eq("application_id", appId)
       .eq("chat_type", "narrative")
       .order("created_at", { ascending: true }),
     supabase
       .from("chat_messages")
-      .select("*")
+      .select("role,content")
       .eq("application_id", appId)
       .eq("chat_type", "audit")
       .order("created_at", { ascending: true }),
     supabase
       .from("chat_messages")
-      .select("*")
+      .select("role,content")
       .eq("application_id", appId)
       .eq("chat_type", "grading_audit")
       .order("created_at", { ascending: true }),
-    supabase
-      .from("data_chats")
-      .select("*")
-      .eq("application_id", appId)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("data_chat_messages")
-      .select("*")
-      .order("created_at", { ascending: true }),
+    // Only fetch data chat messages for this app's chats
+    dataChatIds.length > 0
+      ? supabase
+          .from("data_chat_messages")
+          .select("chat_id,role,content")
+          .in("chat_id", dataChatIds)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     supabase
       .from("load_history")
       .select("*")
@@ -441,30 +453,13 @@ export async function readApplicationFull(
       .from("upload_mappings")
       .select("*")
       .eq("application_id", appId),
+    ...answerPromises,
   ]);
 
-  // 3. Fetch submission answers now that we have submission IDs
-  const submissionIds = (submissionsRes.data ?? []).map(
-    (s: Record<string, unknown>) => s.id as string
-  );
+  // 3. Collect all answers from batched results
   let allAnswers: Record<string, unknown>[] = [];
-  if (submissionIds.length > 0) {
-    // Batch in chunks of 500 to avoid URL length limits
-    const chunks: string[][] = [];
-    for (let i = 0; i < submissionIds.length; i += 500) {
-      chunks.push(submissionIds.slice(i, i + 500));
-    }
-    const answerResults = await Promise.all(
-      chunks.map((chunk) =>
-        supabase
-          .from("submission_answers")
-          .select("*")
-          .in("submission_id", chunk)
-      )
-    );
-    for (const res of answerResults) {
-      if (res.data) allAnswers.push(...res.data);
-    }
+  for (const res of answerResults) {
+    if (res.data) allAnswers.push(...(res.data as Record<string, unknown>[]));
   }
 
   // 4. Group answers by submission_id
@@ -657,13 +652,9 @@ export async function readApplicationFull(
   );
 
   // 13. Assemble data chats with nested messages
-  const dataChatIds = (dataChatsRes.data ?? []).map(
-    (dc: Record<string, unknown>) => dc.id as string
-  );
   const dataChatMsgMap = new Map<string, ChatMessage[]>();
-  for (const msg of dataChatMsgsRes.data ?? []) {
+  for (const msg of (dataChatMsgsRes as { data: Record<string, unknown>[] | null }).data ?? []) {
     const chatId = msg.chat_id as string;
-    if (!dataChatIds.includes(chatId)) continue; // filter to this app
     if (!dataChatMsgMap.has(chatId)) dataChatMsgMap.set(chatId, []);
     dataChatMsgMap.get(chatId)!.push({
       role: msg.role as ChatMessage["role"],
