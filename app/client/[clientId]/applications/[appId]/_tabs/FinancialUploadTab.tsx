@@ -50,7 +50,13 @@ export default function FinancialUploadTab({ app, onSave, remapState, onRemapCom
     if (!file) return;
     const result = await parseFileToRows(file);
     setParsed(result);
-    setMapping(buildInitialMapping(result.headers));
+    // Build mapping with financial-specific overrides
+    const initial = buildInitialMapping(result.headers);
+    setMapping(initial.map((m) => {
+      // Remap grade.financial → financial.grade in financial context
+      if (m.target === "grade.financial") return { ...m, target: "financial.grade" };
+      return m;
+    }));
   }
 
   function updateMapping(idx: number, target: string) {

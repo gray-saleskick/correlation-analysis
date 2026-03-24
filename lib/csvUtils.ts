@@ -161,7 +161,7 @@ export function autoDetectTarget(
   if (lower === "estimated income" || lower === "estimated_income" || lower === "income") return "financial.estimated_income";
   if (lower === "credit access" || lower === "credit_access" || lower === "available credit" || lower === "available_credit") return "financial.available_credit";
   if (lower === "access to funding" || lower === "access_to_funding" || lower === "available funding" || lower === "available_funding") return "financial.available_funding";
-  if (lower === "financial grade" || lower === "financial_grade") return "financial.grade";
+  if (lower === "financial grade" || lower === "financial_grade" || lower === "gradingdata.financialgradingresult.resultinggrade") return "financial.grade";
 
   // Try matching against existing question titles
   const matched = questionTitles.find(

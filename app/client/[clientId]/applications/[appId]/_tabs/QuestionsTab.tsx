@@ -43,7 +43,9 @@ function QuestionCard({
   index,
   total,
   submissions,
+  allQuestions,
   onUpdate,
+  onUpdateSubmissions,
   onRemove,
   isDragOver,
   onDragStart,
@@ -57,7 +59,9 @@ function QuestionCard({
   index: number;
   total: number;
   submissions: AppSubmission[];
+  allQuestions: ApplicationQuestion[];
   onUpdate: (updates: Partial<ApplicationQuestion>) => void;
+  onUpdateSubmissions: (updated: AppSubmission[]) => void;
   onRemove: () => void;
   isDragOver: boolean;
   onDragStart: (idx: number) => void;
@@ -138,6 +142,91 @@ function QuestionCard({
       choices: choiceList.map((label) => ({ id: uid(), label })),
     });
   }
+
+  // ── Per-choice submission counts & viewer ──
+  const [viewingChoice, setViewingChoice] = useState<string | null>(null);
+
+  const choiceSubmissionMap = useMemo(() => {
+    if (!isChoiceType || !(question.choices?.length)) return new Map<string, { sub: AppSubmission; answerValue: string }[]>();
+    const isMulti = question.allow_multiple_selection === true;
+    const map = new Map<string, { sub: AppSubmission; answerValue: string }[]>();
+    for (const choice of question.choices) {
+      map.set(choice.label, []);
+    }
+    // Also track unmatched
+    map.set("__unmatched__", []);
+    for (const sub of submissions) {
+      const ans = sub.answers.find(
+        (a) => a.question_ref === qRef || a.question_title.toLowerCase() === question.title.toLowerCase()
+      );
+      if (!ans?.value || !ans.value.trim()) continue;
+      if (isMulti) {
+        const parts = ans.value.split(",").map((p) => p.trim()).filter(Boolean);
+        for (const part of parts) {
+          const bucket = map.has(part) ? part : "__unmatched__";
+          map.get(bucket)!.push({ sub, answerValue: ans.value });
+        }
+      } else {
+        const val = ans.value.trim();
+        const bucket = map.has(val) ? val : "__unmatched__";
+        map.get(bucket)!.push({ sub, answerValue: ans.value });
+      }
+    }
+    return map;
+  }, [submissions, question.choices, question.title, question.allow_multiple_selection, qRef, isChoiceType]);
+
+  const unmatchedEntries = choiceSubmissionMap.get("__unmatched__") ?? [];
+
+  // Editing state: which submission is expanded in the full editor
+  const [editingSubId, setEditingSubId] = useState<string | null>(null);
+  // Local edits buffer: subId → { questionId → newValue }
+  const [editBuffer, setEditBuffer] = useState<Record<string, Record<string, string>>>({});
+
+  function updateSubmissionAnswer(subId: string, questionRef: string, questionTitle: string, newValue: string) {
+    const updated = submissions.map((sub) => {
+      if (sub.id !== subId) return sub;
+      return {
+        ...sub,
+        answers: sub.answers.map((a) => {
+          if (a.question_ref === questionRef || a.question_title.toLowerCase() === questionTitle.toLowerCase()) {
+            return { ...a, value: newValue };
+          }
+          return a;
+        }),
+      };
+    });
+    onUpdateSubmissions(updated);
+  }
+
+  function saveEditBuffer(subId: string, sub: AppSubmission) {
+    const edits = editBuffer[subId];
+    if (!edits || Object.keys(edits).length === 0) return;
+    const updated = submissions.map((s) => {
+      if (s.id !== subId) return s;
+      // Build new answers array: update existing answers and add new ones for questions that had no answer
+      const newAnswers = [...s.answers];
+      for (const [qId, newValue] of Object.entries(edits)) {
+        const q = allQuestions.find((qq) => qq.id === qId);
+        if (!q) continue;
+        const qRefKey = q.ref ?? q.id;
+        const existingIdx = newAnswers.findIndex(
+          (a) => a.question_ref === qRefKey || a.question_title.toLowerCase() === q.title.toLowerCase()
+        );
+        if (existingIdx >= 0) {
+          newAnswers[existingIdx] = { ...newAnswers[existingIdx], value: newValue };
+        } else if (newValue) {
+          // Add a new answer entry for this question
+          newAnswers.push({ question_ref: qRefKey, question_title: q.title, value: newValue });
+        }
+      }
+      return { ...s, answers: newAnswers };
+    });
+    onUpdateSubmissions(updated);
+    setEditBuffer((prev) => { const next = { ...prev }; delete next[subId]; return next; });
+  }
+
+  const viewingEntries = viewingChoice ? (choiceSubmissionMap.get(viewingChoice) ?? []) : [];
+  const allChoiceLabels = (question.choices ?? []).map((c) => c.label);
 
   return (
     <div
@@ -283,7 +372,9 @@ function QuestionCard({
                 ) : null}
               </div>
               <div className="space-y-1.5">
-                {(question.choices ?? []).map((choice, ci) => (
+                {(question.choices ?? []).map((choice, ci) => {
+                  const count = (choiceSubmissionMap.get(choice.label) ?? []).length;
+                  return (
                   <div key={choice.id} className="flex items-center gap-1.5 group">
                     <input
                       type="text"
@@ -296,6 +387,15 @@ function QuestionCard({
                       className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                       placeholder="Answer choice…"
                     />
+                    {count > 0 && (
+                      <button
+                        onClick={() => setViewingChoice(choice.label)}
+                        className="shrink-0 min-w-[28px] h-6 bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 hover:text-indigo-300 border border-indigo-500/20 rounded-full px-1.5 text-[10px] font-bold tabular-nums transition-colors"
+                        title={`${count} submission${count !== 1 ? "s" : ""} — click to view & edit`}
+                      >
+                        {count}
+                      </button>
+                    )}
                     <input
                       type="text"
                       value={choice.group ?? ""}
@@ -322,7 +422,21 @@ function QuestionCard({
                       </svg>
                     </button>
                   </div>
-                ))}
+                  );
+                })}
+                {/* Unmatched answers row */}
+                {unmatchedEntries.length > 0 && (
+                  <div className="flex items-center gap-1.5 bg-amber-500/[0.06] border border-amber-500/20 rounded-lg px-2.5 py-1.5">
+                    <span className="flex-1 text-xs text-amber-400 font-medium">Unmatched answers</span>
+                    <button
+                      onClick={() => setViewingChoice("__unmatched__")}
+                      className="shrink-0 min-w-[28px] h-6 bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 hover:text-amber-300 border border-amber-500/20 rounded-full px-1.5 text-[10px] font-bold tabular-nums transition-colors"
+                      title={`${unmatchedEntries.length} submission${unmatchedEntries.length !== 1 ? "s" : ""} with answers not matching any choice — click to reassign`}
+                    >
+                      {unmatchedEntries.length}
+                    </button>
+                  </div>
+                )}
                 {/* Datalist for autocomplete of existing group names */}
                 <datalist id={`groups-${question.id}`}>
                   {Array.from(new Set((question.choices ?? []).map(c => c.group).filter(Boolean))).map(g => (
@@ -417,6 +531,245 @@ function QuestionCard({
             <button onClick={onRemove} className="text-xs text-red-400 hover:text-red-400 font-medium transition-colors">
               Delete Question
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Submission Viewer / Editor Modal ── */}
+      {viewingChoice !== null && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => { setViewingChoice(null); setEditingSubId(null); setEditBuffer({}); }}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative bg-slate-900 border border-white/[0.1] rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.08]">
+              <div>
+                <h3 className="text-sm font-bold text-slate-200">
+                  {viewingChoice === "__unmatched__" ? "Unmatched Answers" : `"${viewingChoice}"`}
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {viewingEntries.length} submission{viewingEntries.length !== 1 ? "s" : ""} &middot; {question.title}
+                </p>
+              </div>
+              <button onClick={() => { setViewingChoice(null); setEditingSubId(null); setEditBuffer({}); }} className="text-slate-400 hover:text-slate-200 transition-colors p-1">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {/* Entries */}
+            <div className="overflow-y-auto flex-1 divide-y divide-white/[0.06]">
+              {viewingEntries.length === 0 ? (
+                <div className="px-5 py-8 text-center text-slate-400 text-sm">No submissions found.</div>
+              ) : (
+                viewingEntries.map(({ sub, answerValue }) => {
+                  const isEditing = editingSubId === sub.id;
+                  const subEdits = editBuffer[sub.id] ?? {};
+                  return (
+                    <div key={sub.id} className="px-5 py-3">
+                      {/* Summary row — always visible */}
+                      <div
+                        className="flex items-center gap-3 cursor-pointer"
+                        onClick={() => {
+                          if (isEditing) {
+                            // Save any pending edits when collapsing
+                            saveEditBuffer(sub.id, sub);
+                            setEditingSubId(null);
+                          } else {
+                            // Save previous edits if switching
+                            if (editingSubId) saveEditBuffer(editingSubId, submissions.find((s) => s.id === editingSubId)!);
+                            setEditingSubId(sub.id);
+                          }
+                        }}
+                      >
+                        <svg className={`w-3 h-3 text-slate-500 shrink-0 transition-transform ${isEditing ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-slate-300 font-medium truncate">
+                            {sub.respondent_email || sub.respondent_name || sub.id}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                            This Q: <span className="text-slate-400">{answerValue}</span>
+                          </p>
+                        </div>
+                        {Object.keys(subEdits).length > 0 && (
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">unsaved</span>
+                        )}
+                        <span className="text-[10px] text-slate-500">{isEditing ? "collapse" : "edit all"}</span>
+                      </div>
+
+                      {/* Expanded: full submission editor — shows ALL questions */}
+                      {isEditing && (
+                        <div className="mt-3 ml-6 space-y-1.5">
+                          {allQuestions.map((q) => {
+                            const qRefKey = q.ref ?? q.id;
+                            const isCurrentQ = q.id === question.id;
+                            const hasChoices = CHOICE_QUESTION_TYPES.has(q.type) && q.choices?.length;
+                            // Find existing answer for this question
+                            const existingAns = sub.answers.find(
+                              (a) => a.question_ref === qRefKey || a.question_title.toLowerCase() === q.title.toLowerCase()
+                            );
+                            const currentValue = existingAns?.value ?? "";
+                            // Edit buffer keyed by question id
+                            const editedValue = subEdits[q.id] !== undefined ? subEdits[q.id] : currentValue;
+
+                            return (
+                              <div key={q.id} className={`flex items-start gap-2 rounded-lg px-2.5 py-2 ${isCurrentQ ? "bg-indigo-500/[0.08] border border-indigo-500/20" : "bg-white/[0.02] border border-white/[0.04]"}`}>
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${isCurrentQ ? "text-indigo-400" : "text-slate-500"}`}>
+                                    {q.title}
+                                    {isCurrentQ && <span className="ml-1 text-[8px] text-indigo-300">(this question)</span>}
+                                    {!existingAns && <span className="ml-1 text-[8px] text-amber-400">(no answer)</span>}
+                                  </p>
+                                  {hasChoices ? (
+                                    <select
+                                      value={editedValue}
+                                      onChange={(e) => {
+                                        setEditBuffer((prev) => ({
+                                          ...prev,
+                                          [sub.id]: { ...(prev[sub.id] ?? {}), [q.id]: e.target.value },
+                                        }));
+                                      }}
+                                      className="w-full bg-white/[0.05] border border-white/[0.08] rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                    >
+                                      {editedValue && !q.choices!.some((c) => c.label === editedValue) && (
+                                        <option value={editedValue}>{editedValue} (current - unmatched)</option>
+                                      )}
+                                      <option value="">— empty —</option>
+                                      {q.choices!.map((c) => (
+                                        <option key={c.id} value={c.label}>{c.label}</option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={editedValue}
+                                      onChange={(e) => {
+                                        setEditBuffer((prev) => ({
+                                          ...prev,
+                                          [sub.id]: { ...(prev[sub.id] ?? {}), [q.id]: e.target.value },
+                                        }));
+                                      }}
+                                      className="w-full bg-white/[0.05] border border-white/[0.08] rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                      placeholder="(empty)"
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {/* Save button */}
+                          <div className="flex justify-end pt-1.5">
+                            <button
+                              onClick={() => {
+                                saveEditBuffer(sub.id, sub);
+                                setEditingSubId(null);
+                              }}
+                              disabled={Object.keys(subEdits).length === 0}
+                              className={`px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors ${
+                                Object.keys(subEdits).length > 0
+                                  ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                                  : "bg-white/[0.04] text-slate-500 cursor-not-allowed"
+                              }`}
+                            >
+                              Save Changes
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            {/* Footer with bulk actions */}
+            {viewingEntries.length > 0 && (
+              <div className="px-5 py-3 border-t border-white/[0.08] space-y-2.5">
+                {/* Bulk reassign for unmatched */}
+                {viewingChoice === "__unmatched__" && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400">Reassign all (this question) to:</span>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        for (const { sub } of viewingEntries) {
+                          updateSubmissionAnswer(sub.id, qRef, question.title, e.target.value);
+                        }
+                        setViewingChoice(null);
+                        setEditingSubId(null);
+                      }}
+                      className="bg-white/[0.05] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      <option value="">— Select —</option>
+                      {allChoiceLabels.map((label) => (
+                        <option key={label} value={label}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {/* Bulk migrate to another question */}
+                {viewingChoice !== "__unmatched__" && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] text-amber-400 font-medium">Migrate all {viewingEntries.length} to question:</span>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        const targetQ = allQuestions.find((q) => q.id === e.target.value);
+                        if (!targetQ) return;
+                        const targetRef = targetQ.ref ?? targetQ.id;
+                        const answerValue = viewingChoice!;
+                        // For each submission: set the answer on the target question, clear from current question
+                        const subIds = new Set(viewingEntries.map(({ sub }) => sub.id));
+                        const updated = submissions.map((sub) => {
+                          if (!subIds.has(sub.id)) return sub;
+                          let newAnswers = sub.answers.map((a) => {
+                            // Clear from current question
+                            if (a.question_ref === qRef || a.question_title.toLowerCase() === question.title.toLowerCase()) {
+                              return { ...a, value: "" };
+                            }
+                            // Set on target question if answer already exists
+                            if (a.question_ref === targetRef || a.question_title.toLowerCase() === targetQ.title.toLowerCase()) {
+                              return { ...a, value: answerValue };
+                            }
+                            return a;
+                          });
+                          // If target question had no existing answer entry, add one
+                          const hasTarget = newAnswers.some(
+                            (a) => a.question_ref === targetRef || a.question_title.toLowerCase() === targetQ.title.toLowerCase()
+                          );
+                          if (!hasTarget) {
+                            newAnswers.push({ question_ref: targetRef, question_title: targetQ.title, value: answerValue });
+                          }
+                          return { ...sub, answers: newAnswers };
+                        });
+                        onUpdateSubmissions(updated);
+                        setViewingChoice(null);
+                        setEditingSubId(null);
+                        setEditBuffer({});
+                      }}
+                      className="bg-white/[0.05] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 max-w-[350px]"
+                    >
+                      <option value="">— Select target question —</option>
+                      {allQuestions
+                        .filter((q) => q.id !== question.id)
+                        .map((q) => (
+                          <option key={q.id} value={q.id}>
+                            {q.title.length > 60 ? q.title.slice(0, 60) + "…" : q.title}
+                          </option>
+                        ))}
+                    </select>
+                    <p className="w-full text-[10px] text-slate-500">
+                      Moves &ldquo;{viewingChoice}&rdquo; to the target question and clears it from this one for all {viewingEntries.length} submissions.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1047,10 +1400,12 @@ export default function QuestionsTab({
               index={i}
               total={app.questions.length}
               submissions={submissions}
+              allQuestions={app.questions}
               clientId={clientId}
               appId={app.id}
               companyDescription={companyDescription}
               onUpdate={(updates) => updateQuestion(q.id, updates)}
+              onUpdateSubmissions={(updated) => onSave({ ...app, submissions: updated })}
               onRemove={() => removeQuestion(q.id)}
               isDragOver={qDragState != null && qDragState.overIdx === i && qDragState.dragIdx !== i}
               onDragStart={(idx) => setQDragState({ dragIdx: idx, overIdx: idx })}

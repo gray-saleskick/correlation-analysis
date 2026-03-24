@@ -221,6 +221,13 @@ export async function createClient(
   const { error } = await supabase.from("clients").insert({
     client_id: finalId,
     client_name: name,
+    profile: {
+      clientId: finalId,
+      clientName: name,
+      created_at: now,
+      updated_at: now,
+      applications: [],
+    },
     created_at: now,
     updated_at: now,
   });
