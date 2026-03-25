@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readApplicationCore, readClient } from "@/lib/db";
+import { readApplicationCore, readClient, updateApplicationFields } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 60;
@@ -605,15 +605,30 @@ export async function POST(
     });
 
     const encoder = new TextEncoder();
+    const clientNotesVal = clientNotes?.trim() || undefined;
     const readable = new ReadableStream({
       async start(controller) {
+        let fullText = "";
         try {
           for await (const event of stream) {
             if (
               event.type === "content_block_delta" &&
               event.delta.type === "text_delta"
             ) {
+              fullText += event.delta.text;
               controller.enqueue(encoder.encode(event.delta.text));
+            }
+          }
+          // Persist to DB before closing stream
+          if (fullText.trim()) {
+            try {
+              await updateApplicationFields(appId, {
+                grading_audit_analysis: fullText.trim(),
+                grading_audit_generated_at: new Date().toISOString(),
+                grading_audit_client_notes: clientNotesVal,
+              });
+            } catch (dbErr) {
+              console.error("[grading-audit] DB save failed:", dbErr);
             }
           }
           controller.close();

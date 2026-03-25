@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readApplicationCore } from "@/lib/db";
+import { readApplicationCore, updateApplicationFields } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 60;
@@ -494,13 +494,26 @@ export async function POST(
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       async start(controller) {
+        let fullText = "";
         try {
           for await (const event of stream) {
             if (
               event.type === "content_block_delta" &&
               event.delta.type === "text_delta"
             ) {
+              fullText += event.delta.text;
               controller.enqueue(encoder.encode(event.delta.text));
+            }
+          }
+          // Persist to DB before closing stream
+          if (fullText.trim()) {
+            try {
+              await updateApplicationFields(appId, {
+                narrative_analysis: fullText.trim(),
+                narrative_generated_at: new Date().toISOString(),
+              });
+            } catch (dbErr) {
+              console.error("[narrative] DB save failed:", dbErr);
             }
           }
           controller.close();

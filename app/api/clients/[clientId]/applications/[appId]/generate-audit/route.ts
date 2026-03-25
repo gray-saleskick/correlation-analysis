@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readApplicationCore, readClient } from "@/lib/db";
+import { readApplicationCore, readClient, updateApplicationFields } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 60;
@@ -541,18 +541,34 @@ export async function POST(
     });
 
     const encoder = new TextEncoder();
+    const clientNotesVal = (body as { clientNotes?: string }).clientNotes?.trim() || undefined;
     const readable = new ReadableStream({
       async start(controller) {
+        let fullText = "";
         try {
           for await (const event of stream) {
             if (
               event.type === "content_block_delta" &&
               event.delta.type === "text_delta"
             ) {
+              fullText += event.delta.text;
               controller.enqueue(encoder.encode(event.delta.text));
             }
           }
           console.log(`[audit] Anthropic stream done in ${Date.now() - t1}ms`);
+          // Persist to DB before closing stream (function stays alive while stream is open)
+          if (fullText.trim()) {
+            try {
+              await updateApplicationFields(appId, {
+                audit_analysis: fullText.trim(),
+                audit_generated_at: new Date().toISOString(),
+                audit_client_notes: clientNotesVal,
+              });
+              console.log(`[audit] Saved to DB for ${appId}`);
+            } catch (dbErr) {
+              console.error("[audit] DB save failed:", dbErr);
+            }
+          }
           controller.close();
         } catch (err) {
           console.error("Audit stream error:", err);
