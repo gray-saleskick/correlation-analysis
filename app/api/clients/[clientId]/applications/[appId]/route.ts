@@ -3,6 +3,7 @@ import {
   readApplicationFull,
   updateApplicationFields,
   deleteApplication,
+  moveApplication,
   replaceQuestions,
   bulkUpsertSubmissions,
   replaceFinancialRecords,
@@ -159,6 +160,31 @@ export async function PUT(
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error(`PUT app ${appId} error:`, err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ clientId: string; appId: string }> }
+) {
+  const { appId } = await params;
+  try {
+    const body = await req.json();
+    const { new_client_id } = body as { new_client_id?: string };
+
+    if (!new_client_id?.trim()) {
+      return NextResponse.json({ error: "new_client_id is required" }, { status: 400 });
+    }
+
+    const moved = await moveApplication(appId, new_client_id.trim());
+    if (!moved) {
+      return NextResponse.json({ error: "Failed to move application" }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, new_client_id: new_client_id.trim() });
+  } catch (err) {
+    console.error(`PATCH (move) app ${appId} error:`, err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

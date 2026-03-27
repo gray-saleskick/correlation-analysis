@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { ClientProfile } from "@/lib/types";
@@ -14,7 +14,51 @@ export default function ClientDetailPage({ initialProfile }: { initialProfile: C
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState(initialProfile.company_description ?? "");
   const [savingDesc, setSavingDesc] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  const [moveDestination, setMoveDestination] = useState("");
+  const [moving, setMoving] = useState(false);
+  const [allClients, setAllClients] = useState<{ clientId: string; clientName: string }[]>([]);
   const router = useRouter();
+
+  // Fetch client list when the move modal opens
+  useEffect(() => {
+    if (!moveTarget) return;
+    fetch("/api/clients")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setAllClients(data.clients.filter((c: { clientId: string }) => c.clientId !== profile.clientId));
+        }
+      })
+      .catch(() => {});
+  }, [moveTarget, profile.clientId]);
+
+  async function moveApp(appId: string) {
+    if (!moveDestination || moving) return;
+    setMoving(true);
+    try {
+      const res = await fetch(`/api/clients/${profile.clientId}/applications/${appId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_client_id: moveDestination }),
+      });
+      if (res.ok) {
+        setProfile((p) => ({
+          ...p,
+          applications: p.applications.filter((a) => a.id !== appId),
+        }));
+        setMoveTarget(null);
+        setMoveDestination("");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(`Failed to move: ${(data as { error?: string }).error || res.statusText}`);
+      }
+    } catch (err) {
+      alert("Failed to move application. Please try again.");
+    } finally {
+      setMoving(false);
+    }
+  }
 
   async function saveDescription() {
     setSavingDesc(true);
@@ -216,7 +260,16 @@ export default function ClientDetailPage({ initialProfile }: { initialProfile: C
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMoveTarget(app.id); setMoveDestination(""); }}
+                      className="text-slate-400 hover:text-indigo-400 hover:bg-indigo-400/10 p-1.5 rounded-lg transition-all"
+                      title="Move to another client"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                    </button>
                     <button
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(app.id); }}
                       className="text-slate-400 hover:text-red-400 hover:bg-red-400/10 p-1.5 rounded-lg transition-all"
@@ -263,6 +316,55 @@ export default function ClientDetailPage({ initialProfile }: { initialProfile: C
                   disabled={deleting}
                   className="flex-1 px-4 py-2 text-xs font-semibold bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-40 transition-colors"
                 >{deleting ? "Deleting…" : "Delete"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Move Application Modal */}
+      {moveTarget && (() => {
+        const targetApp = profile.applications.find(a => a.id === moveTarget);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setMoveTarget(null); setMoveDestination(""); }} />
+            <div className="relative bg-slate-900 border border-white/[0.1] rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
+              <div className="flex items-center gap-2 mb-3">
+                <svg className="w-5 h-5 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+                <h3 className="text-sm font-bold text-slate-200">Move Application</h3>
+              </div>
+              <p className="text-[11px] text-slate-300 mb-4">
+                Move &ldquo;{targetApp?.title}&rdquo; to another client. All data (submissions, questions, audits) will move with it.
+              </p>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Destination Client</label>
+              {allClients.length === 0 ? (
+                <div className="text-xs text-slate-400 py-3 text-center">Loading clients…</div>
+              ) : (
+                <select
+                  value={moveDestination}
+                  onChange={(e) => setMoveDestination(e.target.value)}
+                  className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 mb-4 appearance-none"
+                >
+                  <option value="" className="bg-slate-900">Select a client…</option>
+                  {allClients.map((c) => (
+                    <option key={c.clientId} value={c.clientId} className="bg-slate-900">
+                      {c.clientName}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setMoveTarget(null); setMoveDestination(""); }}
+                  className="flex-1 px-4 py-2 text-xs font-semibold border border-white/[0.08] rounded-lg text-slate-300 hover:bg-white/[0.04] transition-colors"
+                >Cancel</button>
+                <button
+                  onClick={() => moveApp(moveTarget)}
+                  disabled={!moveDestination || moving}
+                  className="flex-1 px-4 py-2 text-xs font-semibold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-40 transition-colors"
+                >{moving ? "Moving…" : "Move"}</button>
               </div>
             </div>
           </div>

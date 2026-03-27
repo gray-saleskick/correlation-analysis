@@ -1050,6 +1050,22 @@ export async function deleteApplication(appId: string): Promise<boolean> {
   return (count ?? 0) > 0;
 }
 
+export async function moveApplication(
+  appId: string,
+  newClientId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("applications")
+    .update({ client_id: newClientId, updated_at: isoNow() })
+    .eq("id", appId);
+
+  if (error) {
+    console.error(`moveApplication ${appId} → ${newClientId} error:`, error.message);
+    return false;
+  }
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SUBMISSION FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
